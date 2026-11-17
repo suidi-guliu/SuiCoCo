@@ -1,0 +1,11 @@
+{
+  "id": "suicj.example.hello",
+  "name": "Hello suicoco（示例插件）",
+  "version": "0.1.0",
+  "publisher": "suicoco-official",
+  "description": "第三方插件开发示例：注册命令与状态栏消息，演示 .suicj 插件 API 最小用法。可将其 zip 打包为 .suicj 后在软件内导入测试。",
+  "engines": { "suicoco": ">=0.1.0" },
+  "main": "main.js",
+  "categories": ["示例"],
+  "activationEvents": ["onStartup"]
+}

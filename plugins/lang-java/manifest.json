@@ -1,0 +1,17 @@
+{
+  "id": "suicj.lang.java",
+  "name": "Java 语言支持",
+  "version": "0.1.0",
+  "publisher": "suicoco-official",
+  "description": "Java 语法高亮、补全、代码片段与编译运行任务（依赖 java 语言环境 OpenJDK，官方源安装）。",
+  "engines": { "suicoco": ">=0.1.0" },
+  "main": "main.js",
+  "requiresEnv": "java",
+  "categories": ["语言环境", "编程语言"],
+  "activationEvents": ["onLanguage:java"],
+  "contributes": {
+    "languages": [
+      { "id": "java", "extensions": [".java"] }
+    ]
+  }
+}

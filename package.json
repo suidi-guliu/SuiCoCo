@@ -1,0 +1,17 @@
+{
+  "name": "suicoco",
+  "productName": "suicoco",
+  "version": "0.1.0",
+  "description": "suicoco — 插件驱动的类 VSCode 代码编辑器（.suicj 插件生态）",
+  "main": "src-electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

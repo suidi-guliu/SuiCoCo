@@ -1,0 +1,9 @@
+# 构建产物（由 CI 从 plugins/ 源码构建后提交，见 .github/workflows/build-plugins.yml）
+release/*.suicj
+
+# 运行时
+node_modules/
+.suicoco/
+__pycache__/
+*.log
+.DS_Store

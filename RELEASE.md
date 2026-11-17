@@ -2,6 +2,9 @@
 
 ## v0.1.0 — 首个阶段版（架构原型）
 
+> **发布状态**：已推送至 GitHub 公开仓库 [suidi-guliu/SuiCoCo](https://github.com/suidi-guliu/SuiCoCo)，主分支 `main`，发布提交 `c5800f4b`（`release: v0.1.0 首个阶段版`）。二进制 `.suicj` 由 CI（`.github/workflows/build-plugins.yml`）在推送后从插件源码自动构建。
+
+
 - **软件本体**：VSCode Dark Modern 风格工作台（活动栏/侧边栏/标签/面包屑/状态栏/终端面板/命令面板/IntelliSense 补全弹层），无 AI 入口
 - **插件引擎**：`.suicj` 自有插件格式（zip 容器）完整生命周期——安装、激活事件（onStartup / onLanguage / onCommand）、贡献点注册、卸载回收；纯 JS 解包（STORE/DEFLATE）；manifest 强制校验与 engines 版本检查
 - **官方插件 ×4**：C/C++、Python、Java 语言插件（语法高亮/补全/片段/诊断/运行任务）+ Hello 示例插件；产物位于 `release/*.suicj`，全部通过 `verify-plugin.sh`

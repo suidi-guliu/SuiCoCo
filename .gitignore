@@ -1,9 +1,26 @@
-# 构建产物（由 CI 从 plugins/ 源码构建后提交，见 .github/workflows/build-plugins.yml）
-release/*.suicj
+# Gradle
+.gradle/
+build/
+*/build/
+**/build/
 
-# 运行时
-node_modules/
-.suicoco/
+# Android
+local.properties
+*.iml
+.idea/
+.externalNativeBuild/
+.cxx/
+captures/
+*.apk
+*.aab
+
+# 隐私：含内网网关地址的发布脚本仅本地使用
+scripts/publish-github.py
+
+# Python
 __pycache__/
-*.log
+*.pyc
+
+# 系统
 .DS_Store
+*.log

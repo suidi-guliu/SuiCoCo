@@ -1,67 +1,72 @@
 # suicoco
 
-> 类 VSCode 代码编辑器 · 插件驱动 IDE · 自有 `.suicj` 插件格式 · Ubuntu 精简系统图形化安装
+> 面向**安卓平板**的类 VSCode 代码编辑器 · 插件驱动 IDE
+> 独立从零构建，借鉴 JCode (j-code-android) 的内部组织架构
 
-**suicoco** 以 Ubuntu 精简系统环境为基础构建的类 VSCode 编辑器。软件本体不包含系统与语言环境——使用者通过软件内图形化向导从**官方来源**完成「Ubuntu 精简系统安装」与「语言环境安装（C/C++、Python、Java）」；插件从官方 GitHub 仓库下载，或以 `.suicj` 自有格式从第三方导入。
+suicoco 是一款原生安卓应用（Kotlin + Jetpack Compose），提供 VSCode 风格的编码体验。软件本体**不包含**操作系统与语言环境——使用者通过图形化向导按需安装 Ubuntu 精简系统与 C/C++、Python、Java 语言环境。
 
-## 分层架构
+**最终产物**：`app-debug.apk` + `.suicj` 插件包。
+
+## 五层架构
 
 ```
-L0 内核 → L1 Ubuntu 精简系统(debootstrap minbase, 官方源)
-→ L2 suicoco 软件本体(编辑器+插件引擎+安装向导)
-→ L3 自有插件 .suicj → L4 语言环境(gcc/python/openjdk, 官方源 apt)
+L4 语言环境   apt 官方源：C/C++ · Python · Java（按需安装）
+L3 自有插件   .suicj（zip + manifest + JS），官方下载 / 第三方导入
+L2 软件本体   Kotlin + Compose APK（VSCode UI，去 AI 入口）
+L1 系统环境   proot + ARM64 Ubuntu 24.04 LTS（图形化安装，官方源）
+L0 内核       安卓平板 Linux 内核（设备提供，不打包）
 ```
 
-详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+## 特性
 
-## 快速体验（网页原型）
+- **VSCode 风格工作台**：活动栏、资源管理器、编辑器标签、面包屑、终端面板、命令面板、IntelliSense 补全弹层、状态栏——99% 细节复刻，无 AI 入口
+- **自有插件格式 `.suicj`**：zip 容器 + manifest.json + main.js，Rhino 引擎执行；**不兼容任何其他格式**
+- **语言插件**：C/C++、Python、Java（语法高亮、补全、片段、运行任务），可按规范无限扩展
+- **图形化安装向导**：Ubuntu 精简系统（官方 rootfs 源）+ 语言环境（apt 官方源），分层依赖、来源徽标、进度反馈
+- **无 root 运行时**：借鉴 JCode，隔离完全在 proot 用户空间，硬性禁止 host root
 
-直接用浏览器打开 `app/index.html`（或经 HTTP 服务访问）：
+## 工程结构（多模块 Gradle，依赖规则沿用 JCode）
 
-1. **插件市场**（活动栏方块图标）→ 安装官方语言插件：C/C++、Python、Java
-2. 打开 `hello.c` / `main.cpp` / `app.py` / `Hello.java` → 语法高亮/补全（`Ctrl+Space`）
-3. **系统与环境安装**（圆柱图标）→ 先装 Ubuntu 精简系统 → 再装语言环境
-4. `Ctrl+Shift+P` 命令面板 · `Ctrl+P` 快速打开 · 底部终端输入 `help`
-5. 第三方导入：把 `release/suicj.example.hello.suicj` 拖入「导入第三方插件」即可实测 `.suicj` 解包与激活
+```
+app/                 集成层 + 主 Shell（VSCode UI）
+core/                design / fs / config / buffer / editor / term / distro / syntax / extapi / extengine ...
+feature/             explorer / editorpane / terminalpane / marketplace / onboarding / settings
+native/              proot / pty（JNI 桥，arm64-v8a）
+plugins/             C/C++ · Python · Java · 示例插件源码
+release/             已打包的 .suicj 插件
+docs/                架构设计 / 插件规范 / 安装向导设计
+legacy-web-prototype/ 早期 Web 原型（UI 参考，非交付物）
+```
 
-> 网页原型的安装向导为**模拟执行**（真实安装脚本已备好，见桌面版对接差异说明）。
+依赖规则：`:core:*` 不依赖 `:feature:*`；`:feature:*` 只依赖 `:core:*`；`:native:*` 是叶子模块；`:app` 聚合一切。
 
-## 桌面版启动（阶段5，需 Node 20+ 与 Electron）
+## 构建
+
+环境：JDK 21 / Android SDK platform 36 / NDK 27 / CMake 3.31
 
 ```bash
-npm install        # 安装 Electron
-npm start          # 启动 suicoco 桌面版
+./gradlew :app:assembleDebug
+# → app/build/outputs/apk/debug/app-debug.apk
 ```
 
-真实环境安装（可手动预演）：
+插件打包与校验：
 
 ```bash
-bash scripts/install-ubuntu-minimal.sh        # Ubuntu 精简系统（官方源）
-bash scripts/install-lang-env.sh python      # python 语言环境（官方源 apt）
+for p in plugins/*/; do bash scripts/build-plugin.sh "$p"; done
+bash scripts/verify-plugin.sh
 ```
 
-## 插件生态
+## 插件开发
 
-| 渠道 | 入口 | 说明 |
-|---|---|---|
-| 官方插件 | 插件市场「从 GitHub 仓库获取」 | 仓库地址在设置中配置，从 `release/` 下载 `.suicj` |
-| 第三方插件 | 插件市场「导入第三方插件 (.suicj)」 | 仅支持 `.suicj` 自有格式，**不兼容其他插件格式** |
+见 [docs/PLUGIN_SPEC.md](docs/PLUGIN_SPEC.md)。要点：`.suicj` 是唯一格式，第三方仅能通过软件内导入按钮导入，导入时强制校验 manifest、engines 兼容性与目录穿越防护。
 
-- 插件开发规范：[docs/PLUGIN_SPEC.md](docs/PLUGIN_SPEC.md)（新语言 = 新插件，无需改动软件本体）
-- 当前官方插件：C/C++ · Python · Java · Hello 示例（`plugins/`，产物 `release/*.suicj`）
-- 校验：`bash scripts/verify-plugin.sh`（每日巡检自动化亦调用此脚本）
+## 文档
 
-## UI 说明
+- [架构设计](docs/ARCHITECTURE.md)
+- [插件开发规范](docs/PLUGIN_SPEC.md)
+- [安装向导设计](docs/INSTALLER_DESIGN.md)
+- [版本记录](RELEASE.md)
 
-布局/配色/快捷键逐项复刻 VSCode Dark Modern（活动栏、侧边栏、标签、面包屑、IntelliSense 弹层、命令面板、状态栏、终端面板），**不含 AI 入口**。
+## GitHub
 
-## 路线图
-
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| 1 | VSCode 风格编辑器壳（UI 复刻） | ✅ v0.1.0 |
-| 2 | 插件引擎与 `.suicj` 格式 | ✅ v0.1.0 |
-| 3 | 语言插件 C/C++ · Python · Java | ✅ v0.1.0 |
-| 4 | 图形化安装向导（官方源） | 🔶 原型完成 |
-| 5 | Electron 桌面壳 + 真实安装对接 | ⬜ 骨架就绪 |
-| 6 | 插件市场 GitHub 仓库 + 第三方导入全流程 | ⬜ |
+https://github.com/suidi-guliu/SuiCoCo

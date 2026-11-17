@@ -1,142 +1,131 @@
-# suicoco 插件开发规范（.suicj 自有插件格式）
+# suicoco 插件开发规范（`.suicj`）
 
-> 本文是 suicoco 插件（后缀 **`.suicj`**）的唯一权威规范。suicoco **不兼容** VSCode / Eclipse / 其他任何插件格式；第三方插件必须按本规范开发并转换为 `.suicj` 后，通过软件内的「第三方导入」按键导入。
+> 版本 1.0 · 适用于 suicoco 0.1.0+ · 自有插件格式，不兼容任何其他格式
 
-## 1. 包结构
+## 1. 总则
 
-`.suicj` 是一个 **zip 容器**，根目录必须包含两个文件：
+suicoco 是面向安卓平板的类 VSCode 代码编辑器（Kotlin + Jetpack Compose，借鉴 JCode 组织架构）。插件是扩展其语言能力、命令、任务的**唯一**方式。
+
+- **唯一格式**：`.suicj`（本质是 zip 容器）。
+- **不兼容声明**：不接受 VSCode 的 `.vsix`、JCode 的 `.jext`、或任何其他第三方扩展格式。导入非 `.suicj` 文件一律拒绝。
+- **来源约束**：软件内仅开放两个入口——① 官方插件仓库下载（GitHub）；② 第三方 `.suicj` 导入按钮。
+- **性能层**：插件逻辑为 JavaScript，由内置 Rhino 引擎执行；性能敏感的编辑/终端/解析由 APK 的 native 层承担，不向插件开放。
+
+## 2. 包结构
+
+一个 `.suicj` 是标准 ZIP（存储或 deflate 均可），根目录必须包含：
 
 ```
-my-plugin.suicj          ← zip 文件，扩展名固定 .suicj
-├── manifest.json        ← 必需，插件元数据与兼容性声明
-├── main.js             ← 必需（路径由 manifest.main 指定），CommonJS 入口
-└── (可选) README.md / 语法文件 / 片段库等静态资源
+my-plugin.suicj  (zip)
+├── manifest.json    # 必需，插件清单
+├── main.js          # 必需（或 manifest.main 指定的路径）
+├── grammar.json     # 可选，语法规则
+└── assets/          # 可选，图标/片段等资源
 ```
 
-打包方式（任选其一）：
+## 3. manifest.json 字段
 
-```bash
-# 方式一：官方脚本
-scripts/build-plugin.sh plugins/my-plugin
-
-# 方式二：手工 zip（压缩方式不限，store/deflate 均支持）
-cd my-plugin && zip -r ../my-plugin.suicj manifest.json main.js
-```
-
-## 2. manifest.json 规范
-
-| 字段 | 必填 | 类型 | 说明 |
+| 字段 | 必需 | 类型 | 说明 |
 |---|---|---|---|
-| `id` | ✓ | string | 全局唯一，`^[a-z0-9][a-z0-9.-]*$`，建议 `suicj.<作者>.<名称>` |
-| `name` | ✓ | string | 显示名（中文可） |
-| `version` | ✓ | string | semver，如 `0.1.0` |
-| `main` | ✓ | string | 入口文件，必须 `.js` 结尾 |
-| `engines` | ✓ | object | `{ "suicoco": ">=0.1.0" }`，不满足则拒绝安装 |
-| `publisher` | — | string | 发布者；官方插件为 `suicoco-official` |
-| `description` | — | string | 插件市场显示的描述 |
-| `categories` | — | string[] | 如 `编程语言`、`语言环境`、`工具`、`主题` |
-| `activationEvents` | — | string[] | 见 §4 |
-| `contributes` | — | object | `{ "languages": [{ "id", "extensions": [".xx"] }] }`，声明本插件支持的语言与扩展名，引擎据此在打开文件时懒激活 |
-| `requiresEnv` | — | string | 依赖的语言环境：`cpp` / `python` / `java`（安装器据此引导） |
+| `id` | ✅ | string | 形如 `publisher.name`，如 `suicj.lang.python` |
+| `name` | ✅ | string | 显示名称 |
+| `version` | ✅ | string | 语义化版本 `x.y.z` |
+| `main` | ✅ | string | JS 入口，默认 `main.js` |
+| `engines` | ✅ | object | 必须含 `"suicoco": "^0.1.0"` 等版本范围 |
+| `description` | — | string | 描述 |
+| `publisher` | — | string | 发布者 |
+| `categories` | — | string[] | 分类 |
+| `requiresEnv` | — | string | 依赖语言环境：`cpp`/`python`/`java`，安装器据此引导 |
+| `activationEvents` | — | string[] | `onLanguage:c` / `onStartup` / `onCommand:xxx` |
+| `contributes` | — | object | 声明式贡献点（见 §5） |
 
-manifest 示例（见 `plugins/lang-python/manifest.json`）。
+**engines 版本范围**：支持 `*`、精确版本 `0.1.0`、`^x.y.z`（同主版本）、`>=x.y.z`。不兼容时拒绝安装。
 
-**校验**：安装时强制校验必填字段、id 字符集、入口存在、engines 兼容；CI 可用 `scripts/verify-plugin.sh`。
+## 4. 生命周期与 ctx API
 
-## 3. 入口与生命周期
-
-`main.js` 必须导出 `activate`（可选 `deactivate`），运行在受控上下文（CommonJS 风格）：
+插件在 `main.js` 中导出 `activate(ctx)`。引擎调用它并注入 `ctx`：
 
 ```js
-"use strict";
-
 function activate(ctx) {
-  // ctx = 插件运行上下文（见 §5）
-  ctx.languages.registerLanguage({ id: "go", name: "Go",
-    extensions: [".go"], grammar: { /* ... */ } });
+  ctx.languages.registerLanguage({
+    id: "python", name: "Python", extensions: [".py"], grammar: {...}
+  });
+  ctx.tasks.registerTasks([
+    { id: "py.run", label: "运行 Python", language: "python", command: 'python3 "${file}"' }
+  ]);
 }
-
 module.exports = { activate };
 ```
 
-生命周期：`导入/安装 → installed → 满足激活事件 → activated → 贡献点生效`；
-`uninstall` 时引擎自动回收该插件注册的全部贡献点。
+可用 ctx 能力（**白名单，其他一律不可用**）：
 
-## 4. 激活事件
-
-| 事件 | 时机 |
+| API | 说明 |
 |---|---|
-| `onStartup` | 软件启动/插件安装后立即激活 |
-| `onLanguage:<id>` | 打开匹配语言文件时激活（语言插件推荐） |
-| `onCommand:<id>` | 首次调用 `registerCommand` 注册的命令时激活 |
+| `ctx.version` | suicoco 版本字符串 |
+| `ctx.languages.registerLanguage(def)` | 注册语言（id/name/extensions/grammar） |
+| `ctx.languages.registerCompletionItemProvider(lang, provider)` | 注册补全提供者 |
+| `ctx.tasks.registerTasks(list)` | 注册运行任务 |
+| `ctx.commands.registerCommand(id, title, handler)` | 注册命令 |
+| `ctx.window.showMessage / showInformationMessage / showErrorMessage / setStatusBarMessage` | UI 提示 |
+| `ctx.workspace.onDidSave(handler)` | 保存文件回调 |
+| `ctx.diagnostics.setProblems(list)` | 发布诊断问题 |
 
-> 缺省视为 `onStartup`。
+## 5. 贡献点（contributes）
 
-## 5. 插件 API（ctx）
+无需执行 JS 即可生效的声明式能力，推荐优先使用：
 
-### 5.1 languages —— 语言注册与补全
-
-```js
-ctx.languages.registerLanguage({
-  id: "cpp", name: "C++",
-  extensions: [".cpp", ".hpp"],
-  grammar: {
-    lineComment: "//", blockComment: ["/*", "*/"],
-    stringQuotes: ['"', "'"], preprocessor: true,  // C/C++ 风格 # 指令
-    decorator: "@\\w+",                            // 可选：装饰器/注解
-    keywords: ["class", "int"], control: ["if", "for"],
-    types: ["std"], constants: ["true", "nullptr"], builtins: [], snakeIsVar: false
-  }
-});
-
-ctx.languages.registerCompletionItemProvider("cpp", {
-  provideCompletionItems(prefix) {
-    return [ { label: "for", detail: "snippet", kind: "snippet", insert: "for () {\n}" } ];
-  }
-});
+```json
+"contributes": {
+  "languages": [{ "id": "c", "extensions": [".c", ".h"] }],
+  "commands": [{ "command": "suicj.about", "title": "关于" }],
+  "snippets": [{ "language": "cpp", "prefix": "main", "body": ["int main(){", "  $0", "}"] }]
+}
 ```
 
-grammar 各字段均为**可选**；未注册语言 → 纯文本；未注册补全 → 无提示。**这就是「语言种类可后期简单开发扩展」的方式：新语言 = 新插件，零改动软件本体。**
+## 6. 语法规则（grammar.json）
 
-### 5.2 tasks —— 运行任务
+轻量声明式语法，覆盖 C/C++/Python/Java 等语言：
 
-```js
-ctx.tasks.registerTask({
-  id: "suicj.task.cpp.run", label: "C++: 编译并运行当前文件",
-  language: "cpp",                     // 触发时按当前文件语言过滤
-  command: 'g++ -std=c++17 "${file}" -o "${fileBase}.out && ./${fileBase}.out"'
-  // 变量: ${file} 当前文件路径 / ${fileBase} 去扩展名
-});
+```json
+{
+  "lineComment": "//",
+  "blockComment": ["/*", "*/"],
+  "stringQuotes": ["\"", "'"],
+  "keywords": ["int", "return", "class"],
+  "control": ["if", "else", "for", "while"],
+  "types": ["std", "string", "vector"],
+  "constants": ["true", "false", "null"]
+}
 ```
 
-任务在终端面板执行；若 `manifest.requiresEnv` 对应环境未安装，终端报错并引导用户到安装向导。
+## 7. 打包与校验
 
-### 5.3 commands / window / workspace / env / diagnostics
+```bash
+# 打包（zip 容器）
+cd plugins/my-plugin && zip -r ../my-plugin.suicj manifest.json main.js grammar.json
 
-```js
-ctx.commands.registerCommand("suicj.cpp.about", "C/C++: 关于", () => {});
-ctx.window.showInformationMessage("msg");
-ctx.window.setStatusBarMessage("C++ 已就绪", 4000);
-ctx.workspace.onDidSave((file, content) => { /* 轻量诊断 */ });
-ctx.diagnostics.setProblems([{ file, line, severity: "warning", message: "…" }]);
-ctx.env.isInstalled("cpp");       // 查询语言环境是否已安装
-ctx.env.requestInstall("cpp");   // 请求安装向导安装环境
+# 校验
+bash scripts/verify-plugin.sh release/my-plugin.suicj
 ```
 
-## 6. 分发渠道（仅两条）
+校验项：后缀为 `.suicj`、zip 结构、manifest 必填字段、id/version 格式、engines 兼容性、main 文件存在、无目录穿越。
 
-1. **官方插件**：作者向官方插件 GitHub 仓库提交 PR（仓库地址在 suicoco 设置中配置），发布为 `release/<id>.suicj`；用户在插件市场点击安装，软件从该仓库下载。
-2. **第三方导入**：开发者自行打包 `.suicj`，用户通过插件市场的「导入第三方插件 (.suicj)」按键导入。软件会做：格式检查（必须是 .suicj）→ manifest 校验 → engines 版本检查。**不做**签名/商店审核，风险由导入者自担（导入时会有来源提示）。
+## 8. 安装来源
 
-## 7. 开发调试建议
+- **官方插件**：从 GitHub 仓库 `suidi-guliu/SuiCoCo` 的 `release/` 下载，设置中可配置仓库地址。
+- **第三方插件**：通过软件内「导入 .suicj」按钮选择本地文件；导入时执行 §7 全部校验，失败即拒绝并提示原因。
 
-- 参考示例：`plugins/example-hello/`（最小插件）、`plugins/lang-*/`（语言插件完整实现）
-- 打包前自检：`bash scripts/verify-plugin.sh release/my.suicj`
-- 网页原型中即可测试导入：插件市场 → 导入第三方插件
-- 版本升级：改 `manifest.version`；用户重复导入/安装即完成更新（同 id 覆盖）
+## 9. 安全约束
 
-## 8. 路线图中的规范变更
+- 无 host root：插件不能提权，不能访问 APK 私有数据之外的文件。
+- ctx 是能力白名单，插件无法任意执行原生代码。
+- manifest 的 `engines` 强制校验，防止跨版本不兼容。
+- 目录穿越路径在解包时被拒绝。
 
-- v0.2：`contributes` 扩展声明式贡献（片段/主题用 JSON 而非 JS）
-- v0.3：插件间依赖声明 `extensionDependencies` 与受控 `ctx.api` 版本化
-- 变更均**向后兼容**（新增字段可选），破坏性变更将在本文件顶部标注迁移指南。
+## 10. 扩展新语言
+
+1. 复制 `plugins/lang-python/` 为模板；
+2. 改 `manifest.json` 的 id/name/extensions/requiresEnv；
+3. 改 `main.js` 的 grammar 与 tasks（编译/运行命令）；
+4. 按 §7 打包并放入 `release/`；
+5. 语言种类可无限扩展，无需改动 APK 本体。

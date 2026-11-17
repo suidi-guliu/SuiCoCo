@@ -1,0 +1,34 @@
+# suicoco 插件构建流水线：push 到 main 后自动从 plugins/ 源码
+# 构建 .suicj 产物并提交回 release/，使官方插件下载 raw 链接始终有效。
+name: build-plugins
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: 校验插件源码
+        run: |
+          pip install -q python3 2>/dev/null || true
+          python3 scripts/embed-plugins.py
+          for d in plugins/*/; do bash scripts/build-plugin.sh "$d"; done
+          bash scripts/verify-plugin.sh
+
+      - name: 提交构建产物
+        run: |
+          git config user.name "suicoco-bot"
+          git config user.email "bot@suicoco.local"
+          git add release/ app/js/plugin-bundle.js
+          git diff --cached --quiet && echo "无变更" && exit 0
+          git commit -m "chore(release): build .suicj artifacts [skip ci]"
+          git push

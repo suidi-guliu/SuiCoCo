@@ -1,48 +1,49 @@
-# suicoco 图形化安装向导设计
+# 图形化安装向导设计
 
-> 目标：软件本体**不内置**系统与语言环境。使用者通过纯图形化操作完成
-> 「Ubuntu 精简系统安装」与「语言环境安装」，来源一律为**官方源**。
+## 1. 目标
 
-## 1. 安装项矩阵
+让使用者通过**纯图形化操作**完成两层安装，无需命令行、无需 root：
 
-| 安装项 | 层次 | 官方来源 | 实现脚本 | 大小（约） |
-|---|---|---|---|---|
-| Ubuntu 精简系统 | L1 | `archive.ubuntu.com`（debootstrap minbase） | `scripts/install-ubuntu-minimal.sh` | 180 MB |
-| C/C++ 环境 | L4 | apt：`build-essential`、`gdb` | `scripts/install-lang-env.sh cpp` | 120 MB |
-| Python 环境 | L4 | apt：`python3`、`python3-pip`、`python3-venv` | `scripts/install-lang-env.sh python` | 40 MB |
-| Java 环境 | L4 | apt：`openjdk-17-jdk` | `scripts/install-lang-env.sh java` | 260 MB |
+1. **Ubuntu 精简系统**（L1）：下载官方 ARM64 rootfs，经 proot 在安卓用户空间运行
+2. **语言环境**（L4）：apt 官方源安装 C/C++、Python、Java 工具链
 
-## 2. 依赖与顺序约束
+## 2. 分层依赖
 
 ```
-Ubuntu 精简系统 (L1)
-        ├── C/C++ 环境 (L4)   ← 必须先有 L1
-        ├── Python 环境 (L4)   ← 必须先有 L1
-        └── Java 环境 (L4)     ← 必须先有 L1
+[系统未安装] → 语言环境安装按钮禁用
+[系统已安装] → 可安装任意语言环境
 ```
 
-- 语言环境安装前强制检查 L1 存在，缺失则引导先装底座；
-- 卸载 L1 前强制要求先卸载全部语言环境；
-- 语言插件（`.suicj`）声明 `requiresEnv`，安装插件 → 缺环境 → 自动引导到本向导。
+强约束：未安装 Ubuntu 底座时，不允许安装语言环境。
 
-## 3. 交互流程（UI）
+## 3. 向导步骤
 
-1. 活动栏「系统与环境安装」图标（圆柱 + 下载样式）打开向导视图；
-2. 每个安装项一张卡片：标题、说明、**来源徽标（官方源）**、进度条、逐行日志区；
-3. 点击「安装」→ 禁用其他安装按钮（单任务队列）→ 进度条随脚本 stdout 步进；
-4. 完成后卡片变为「已安装」徽标，状态栏 `环境:` 实时汇总；
-5. 「重新安装 / 卸载」按钮始终可用。
+| 步骤 | 标题 | 来源 | 执行 |
+|---|---|---|---|
+| 1 | 下载 Ubuntu 24.04 LTS (ARM64) | archive.ubuntu.com 官方源 | RootfsManager.download + extract |
+| 2 | C/C++ 工具链 | Ubuntu apt 官方源 | apt-get install gcc g++ gdb cmake make |
+| 3 | Python 环境 | Ubuntu apt 官方源 | apt-get install python3 python3-pip python3-dev |
+| 4 | Java 环境 | Ubuntu apt 官方源 | apt-get install openjdk-17-jdk maven |
 
-## 4. 演示版与桌面版实现差异
+每步显示：标题、来源徽标（🔒 官方源）、状态（待安装/安装中/完成）、进度。
 
-| | 网页原型（当前） | Electron 桌面版（阶段5） |
-|---|---|---|
-| 进度来源 | 内置脚本台词模拟 | `spawn` 真实执行 scripts/*.sh，stdout 逐行回传（`installer:log` IPC） |
-| 环境状态 | localStorage | `~/.suicoco/envs/.installed/<env>` 标记文件 |
-| 提权 | — | `pkexec`/`sudo` 弹窗授权，仅安装期间提权 |
+## 4. 无 root 实现
 
-## 5. 安全与合规
+- 隔离完全在 proot 用户空间，`-0` 提供 guest 内的 fake root（apt 需要）
+- 无 su、无 libsu、无 Shizuku
+- rootfs 存放于 app 私有目录 `filesDir/distro/ubuntu-24.04`
 
-- 所有下载仅走 Ubuntu 官方源（`archive.ubuntu.com` / `security.ubuntu.com`），不引入任何第三方镜像；
-- 插件运行任务执行前检查对应环境标记，缺失即拒绝并引导安装；
-- 安装脚本以 `set -euo pipefail` 运行，任何步骤失败即中止并回显日志。
+## 5. proot 命令（ProotManager.buildCommand）
+
+```
+libproot.so -r <rootfs> -0 \
+  -b /dev:/dev -b /proc:/proc -b /sys:/sys \
+  -w /workspace --kill-on-exit --link2symlink --sysvipc \
+  -k 6.1.0 --verbose=-1 <command...>
+```
+
+## 6. 原型与真实执行
+
+- 网页/原型阶段：向导步骤为模拟（点击即标记完成）
+- 桌面/真机阶段：每步通过 proot PTY 执行真实脚本，逐行回传日志与进度
+- 脚本见 `scripts/install-ubuntu-minimal.sh` 与 `scripts/install-lang-env.sh`（归档于 legacy-web-prototype，待迁移适配）

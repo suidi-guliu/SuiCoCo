@@ -1,6 +1,12 @@
 # suicoco 版本记录
 
-## v0.2.0 — 安卓原生架构重建（当前版本）
+## v0.2.1 — 修复 CI APK 构建（当前版本）
+
+- **CI 修复**：移除持续故障的第三方 action `android-actions/setup-android@v3`（连续 5 次构建失败），改用 `ubuntu-latest` 预装 Android SDK（`$ANDROID_HOME`），新增 SDK 许可证接受步骤
+- **插件校验**：4 个 `.suicj` 全部重新校验通过
+- 后续建议（详见项目讨论区 2026-11-18 日报）：发布 v0.2.0/v0.2.1 正式 tag 与 GitHub Release；阶段4 真实安装脚本对接
+
+## v0.2.0 — 安卓原生架构重建
 
 > **重大方向修正**：从早期 Web/Electron 原型（已归档至 `legacy-web-prototype/`）重建为面向安卓平板的原生 APK，架构借鉴 JCode。
 

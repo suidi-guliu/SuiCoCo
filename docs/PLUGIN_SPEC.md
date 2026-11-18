@@ -112,7 +112,7 @@ bash scripts/verify-plugin.sh release/my-plugin.suicj
 
 ## 8. 安装来源
 
-- **官方插件**：从 GitHub 仓库 `suidi-guliu/SuiCoCo` 的 `release/` 下载，设置中可配置仓库地址。
+- **官方插件**：从 GitHub 仓库 `suidi-guliu/SuiCoCo` 的 `release/` 下载，设置中可配置仓库地址。仓库地址由 `core:config` 的 `PluginRepositoryConfig` 校验：仅允许 https、仅信任 github.com / raw / objects.githubusercontent.com 白名单域名、拒绝 IP 字面量与私网/环回地址、拒绝 user:pass 凭证、端口仅允许缺省或 443，非法地址一律拒绝（fail-closed）。插件清单地址为 `<仓库根>/release/suicj-catalog.json`。
 - **第三方插件**：通过软件内「导入 .suicj」按钮选择本地文件；导入时执行 §7 全部校验，失败即拒绝并提示原因。
 
 ## 9. 安全约束

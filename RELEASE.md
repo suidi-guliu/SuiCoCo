@@ -5,7 +5,8 @@
 - **P2 CI 依赖升级**（2026-11-18 12:00 巡检日报新发现项）：
   1. `actions/checkout@v4` → `@v5`、`actions/setup-java@v4` → `@v5`、`actions/upload-artifact@v4` → `@v5`，统一迁移到 Node 24 运行时，消除 GitHub Actions 对 Node 20 的 deprecated 告警与被强制跑在 Node 24 的警告；
   2. 两个 job 的 `runs-on: ubuntu-latest` 固定为 `ubuntu-24.04`，避免 ubuntu-latest 迁移至 Ubuntu 26 带来的工具链（NDK 27 / CMake 3.31）兼容不确定性；
-  3. 升级前已通过 GitHub REST API 确认 checkout@v5 / setup-java@v5 / upload-artifact@v5 三个 major tag 均存在（HTTP 200），升级后由 GitHub Actions 实跑验证。
+  3. `build-plugins.yml` 同步升级 `checkout@v5` + `ubuntu-24.04`，并新增 `concurrency` 组串行化产物提交——修复本轮暴露的真实问题：多个 commit 紧邻推送时，两次产物提交 job 并发 `git push` 导致非快进冲突（其中一次失败）；加并发组后改为排队，消除该竞态；
+  4. 升级前已通过 GitHub REST API 确认 checkout@v5 / setup-java@v5 / upload-artifact@v5 三个 major tag 均存在（HTTP 200），升级后由 GitHub Actions 实跑验证。
 - 本轮为纯 CI 配置改动，无 Kotlin/Compose 源码变更，APK 构建逻辑与 4 个插件产物不变。
 
 ## v0.2.5 — 阶段4 收尾：安装向导对接真实 PTY 执行（当前版本）

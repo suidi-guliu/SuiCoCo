@@ -28,4 +28,6 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(project(":core:distro"))
     implementation(project(":core:design"))
+    implementation(project(":core:term"))
+    implementation(libs.kotlinx.coroutines.android)
 }

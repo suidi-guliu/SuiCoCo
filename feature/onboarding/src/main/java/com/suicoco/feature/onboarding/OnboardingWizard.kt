@@ -97,7 +97,7 @@ fun OnboardingWizard(
             else -> 0f
         }
         LinearProgressIndicator(
-            progress = progressValue,
+            progress = { progressValue },
             modifier = Modifier.fillMaxWidth(),
             color = when (state.step) {
                 InstallStep.DONE -> VscodeTheme.Green

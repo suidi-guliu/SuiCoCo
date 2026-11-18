@@ -45,5 +45,6 @@ libproot.so -r <rootfs> -0 \
 ## 6. 原型与真实执行
 
 - 网页/原型阶段：向导步骤为模拟（点击即标记完成）
-- 桌面/真机阶段：每步通过 proot PTY 执行真实脚本，逐行回传日志与进度
-- 脚本见 `scripts/install-ubuntu-minimal.sh` 与 `scripts/install-lang-env.sh`（归档于 legacy-web-prototype，待迁移适配）
+- 安卓真机阶段（阶段5，2026-11-18 修订）：每步通过 proot PTY 执行真实脚本，逐行回传日志与进度；由 `:core:distro` 的 RootfsManager / ProotManager 驱动，`:native:proot` / `:native:pty` 提供真实 arm64-v8a JNI 桥
+- 原定「Electron 桌面壳」方案已随 v0.2.0 方向修正弃用（归档于 `legacy-web-prototype/`），不再作为执行载体
+- 脚本见 `scripts/install-ubuntu-minimal.sh` 与 `scripts/install-lang-env.sh`（当前归档于 legacy-web-prototype，阶段5 从该目录迁移适配）

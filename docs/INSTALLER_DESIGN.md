@@ -47,4 +47,5 @@ libproot.so -r <rootfs> -0 \
 - 网页/原型阶段：向导步骤为模拟（点击即标记完成）
 - 安卓真机阶段（阶段5，2026-11-18 修订）：每步通过 proot PTY 执行真实脚本，逐行回传日志与进度；由 `:core:distro` 的 RootfsManager / ProotManager 驱动，`:native:proot` / `:native:pty` 提供真实 arm64-v8a JNI 桥
 - 原定「Electron 桌面壳」方案已随 v0.2.0 方向修正弃用（归档于 `legacy-web-prototype/`），不再作为执行载体
-- 脚本见 `scripts/install-ubuntu-minimal.sh` 与 `scripts/install-lang-env.sh`（当前归档于 legacy-web-prototype，阶段5 从该目录迁移适配）
+- 脚本已随 v0.2.4 从 legacy-web-prototype 迁移并适配为 **proot 版**：`scripts/install-ubuntu-minimal.sh`（下载 cdimage.ubuntu.com 官方 ubuntu-base rootfs + SHA256 校验 + proot fake-root 刷新 apt 索引）与 `scripts/install-lang-env.sh`（proot 内 apt 官方源装工具链），全程无 su/sudo/chroot；真机由 app 经 PTY 执行并通过 `SUICOCO_PROOT` 注入释放的 `libproot.so`（arm64-v8a），输出逐行回传向导日志
+- rootfs 解压由 `:core:distro` `RootfsManager.extract` 完成（纯 Kotlin ustar/PAX/GNU tar 解析 + 路径穿越防护 + SHA-256 校验），与脚本下载源（`DistroProfile.UBUNTU_2404`，cdimage.ubuntu.com ubuntu-base 24.04.5 arm64）保持一致

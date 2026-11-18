@@ -6,14 +6,19 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# 多个 commit 紧邻推送时，串行化产物提交，避免 `git push` 非快进冲突
+concurrency:
+  group: build-plugins-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: main
 

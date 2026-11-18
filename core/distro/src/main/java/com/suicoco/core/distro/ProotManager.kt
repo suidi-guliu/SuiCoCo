@@ -13,7 +13,7 @@ class ProotManager(private val context: Context) {
     )
 
     fun buildCommand(rootfs: String, command: List<String>, binds: List<Pair<String, String>> = emptyList(), workdir: String = "/workspace"): List<String> {
-        val prootBinary = File(context.applicationInfo.nativeLibraryDir, "libproot.so").absolutePath
+        val prootBinary = resolveProotBinary()
         val argv = mutableListOf<String>(prootBinary)
         argv += listOf("-r", rootfs, "-0")           // fake root，绝不 su
         argv += listOf("-b", "/dev:/dev", "-b", "/proc:/proc", "-b", "/sys:/sys")
@@ -23,12 +23,38 @@ class ProotManager(private val context: Context) {
         return argv
     }
 
+    /**
+     * 解析 libproot.so 路径：
+     * 1) 优先使用 SUICOCO_PROOT 环境变量注入的绝对路径（供外部/测试注入真实 arm64 .so，阶段5 实体化路径）；
+     * 2) 否则回退到 app nativeLibraryDir 中随包集成的 libproot.so。
+     */
+    private fun resolveProotBinary(): String {
+        val injected = System.getenv(ENV_PROOT)?.trim()
+        if (!injected.isNullOrEmpty()) {
+            val f = File(injected)
+            if (f.isFile && f.canExecute()) return f.absolutePath
+        }
+        return File(context.applicationInfo.nativeLibraryDir, "libproot.so").absolutePath
+    }
+
     fun aptInstallCommand(packages: List<String>): List<String> =
-        listOf("bash", "-lc", "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y " + packages.joinToString(" "))
+        listOf("bash", "-lc", "DEBIAN_FRONTEND=noninteractive apt-get install -y " + packages.joinToString(" "))
+
+    companion object {
+        const val ENV_PROOT = "SUICOCO_PROOT"
+    }
 
     fun assertNoHostRoot(argv: List<String>) {
-        val forbidden = listOf("su", "sudo", "libsu", "shizuku", "--host-root")
-        val bad = argv.firstOrNull { a -> forbidden.any { a.contains(it, ignoreCase = true) } }
+        // argv[0] 是 proot 可执行文件的绝对路径，其中含 "suicoco" 子串，
+        // 旧版对整条 argv 做 "su" 子串匹配会造成自我误判；改为：
+        // - 跳过 argv[0]，仅检查实际命令参数；
+        // - 裸 su/sudo 用整词匹配（含 "sudo " 前缀形式）；
+        // - 明确的危险标记（shizuku / --host-root / libsu.so 等）仍用子串匹配。
+        val markers = listOf("shizuku", "--host-root", "libsu.so", "libsu-")
+        val bad = argv.drop(1).firstOrNull { a ->
+            val t = a.trim().lowercase()
+            t == "su" || t == "sudo" || t.startsWith("sudo ") || markers.any { t.contains(it) }
+        }
         require(bad == null) { "违反无-root 约束: $bad" }
     }
 }

@@ -1,10 +1,14 @@
 # suicoco 版本记录
 
-## v0.2.1 — 修复 CI APK 构建（当前版本）
+## v0.2.2 — CI 自包含修复（当前版本）
 
-- **CI 修复**：移除持续故障的第三方 action `android-actions/setup-android@v3`（连续 5 次构建失败），改用 `ubuntu-latest` 预装 Android SDK（`$ANDROID_HOME`），新增 SDK 许可证接受步骤
+- **CI 二次修复**：v0.2.1 移除故障 action 后暴露 `sdkmanager: command not found`（runner 预装的 sdkmanager 不在 PATH）。改为自包含下载 Android cmdline-tools 到 `$RUNNER_TEMP/android-sdk` 并显式加入 PATH，完全不依赖第三方 action 或 runner 预装状态
 - **插件校验**：4 个 `.suicj` 全部重新校验通过
-- 后续建议（详见项目讨论区 2026-11-18 日报）：发布 v0.2.0/v0.2.1 正式 tag 与 GitHub Release；阶段4 真实安装脚本对接
+- 后续建议（详见项目讨论区 2026-11-18 日报）：发布正式 tag 与 GitHub Release；阶段4 真实安装脚本对接
+
+## v0.2.1 — 修复 CI APK 构建
+
+- 移除持续故障的第三方 action `android-actions/setup-android@v3`（连续 5 次构建失败），改用预装 SDK + 许可证接受（后因 sdkmanager 不在 PATH 由 v0.2.2 进一步完善）
 
 ## v0.2.0 — 安卓原生架构重建
 

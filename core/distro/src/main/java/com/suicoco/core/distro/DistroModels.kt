@@ -16,8 +16,11 @@ data class DistroProfile(
         /** Ubuntu 24.04 LTS ARM64 官方 rootfs */
         val UBUNTU_2404 = DistroProfile(
             id = "ubuntu-24.04", name = "Ubuntu", version = "24.04 LTS", arch = Arch.ARM64,
-            downloadUrl = "https://partner-images.canonical.com/apportable/ubuntu/noble/current/ubuntu-noble-arm64.tar.gz",
-            sizeMb = 90
+            // v0.2.4 修复: 原 partner-images.canonical.com 地址已 404 失效，
+            // 改用 cdimage.ubuntu.com 官方 ubuntu-base（与 scripts/install-ubuntu-minimal.sh 一致）
+            downloadUrl = "https://cdimage.ubuntu.com/ubuntu-base/releases/noble/release/ubuntu-base-24.04.5-base-arm64.tar.gz",
+            sha256 = "a91d5a93010193712d346d761372b7c9db6dfcf093893161c64ca107f05914f2",
+            sizeMb = 33
         )
     }
 }

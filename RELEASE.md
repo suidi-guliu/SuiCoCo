@@ -1,5 +1,13 @@
 # suicoco 版本记录
 
+## v0.2.9 — 历史 Release 产物补齐 + 官方插件仓库地址配置（阶段6 前置）
+
+> 响应 23:59 巡检日报 P1「补齐 v0.2.5~v0.2.7 Release assets」与 P2「阶段6 官方插件仓库地址配置」。补齐四个 Release 的可下载产物，并为设置页仓库地址配置落地可 fail-closed 的安全校验内核。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **补齐历史 Release assets**：为 v0.2.5 / v0.2.6 / v0.2.7 / v0.2.8 四个 GitHub Release 各补挂 5 个产物（`app-debug.apk` + hello / C-C++ / Java / Python 四个 `.suicj`），共 20 个。APK 取自各版本对应的 success Actions run（44235715828 / 44283667575 / 44320825401 / 44344585859），逐一确认含 `AndroidManifest.xml`；插件包经 `verify-plugin.sh` 全部校验通过。至此 v0.2.2~v0.2.8 全部 Release 均具备可下载产物。
+- **新增 `PluginRepositoryConfig.kt`（core/config）**：纯标准库、可独立编译单测的官方插件仓库地址校验对象，对应 `docs/PLUGIN_SPEC.md` §8「设置中可配置仓库地址」。强制 https、域名白名单（github.com / raw / objects.githubusercontent.com）、拒绝 IP 字面量与私网/环回（SSRF）、拒绝 user:pass 凭证注入、端口仅允许缺省或 443、拒绝 fragment 与路径穿越，非法一律 fail-closed；`catalogUrl()` 由合法根地址构造 `release/suicj-catalog.json` 清单路径，为 feature:settings 配置 UI 与 feature:marketplace 官方下载提供基础。
+- **验证**：`PluginRepositoryConfig` 经 kotlinc 2.2.20 真实编译，32 项单测（含 http/ftp/file 协议、仿冒域名、IPv4/IPv6/内网/元数据地址、凭证注入、异端口、fragment、路径穿越等样本）全通过；`bash scripts/verify-plugin.sh` 4 个官方 .suicj 全通过。core:config 无新增依赖，CI 编译安全。
+
 ## v0.2.8 — 第三方插件导入沙箱校验（阶段6 前置）
 
 > 响应 18:00 巡检日报 P2「第三方 .suicj 导入沙箱校验（严格限定自有格式）」。第三方来源的 .suicj 是不可信输入，本轮把校验从「解压后补救」升级为「解压前拦截」，并修复引擎版本兼容判断的硬编码缺陷。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

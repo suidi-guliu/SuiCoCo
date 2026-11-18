@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.31.6)
+project(suicoco_pty C CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_library(suicoco_pty SHARED pty.cpp)
+find_library(log-lib log)
+target_link_libraries(suicoco_pty ${log-lib})

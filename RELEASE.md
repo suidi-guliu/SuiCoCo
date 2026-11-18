@@ -1,6 +1,12 @@
 # suicoco 版本记录
 
-## v0.2.2 — CI 全链路修复，APK 构建打通（当前版本）
+## v0.2.3 — v0.2.2 正式 Release 发布，阶段5 定义修订（当前版本）
+
+- **P0 落地**：创建 `v0.2.2` tag 与 GitHub Release，附 `app-debug.apk` 与 4 个官方 `.suicj` 插件包（hello / C-C++ / Java / Python），产物取自 Actions RUN 44207560406 / 44207560401（双 job success）。
+- **P1 阶段5 定义修订**：随 v0.2.x 弃用 Electron/Web 原型，阶段5 由「Electron 桌面壳」修订为「安卓 proot 运行时与真实环境安装对接」（native proot/pty 实体化、安装脚本 proot PTY 执行）；`docs/INSTALLER_DESIGN.md`、`docs/ARCHITECTURE.md` 同步更新。
+- 本轮未改动源码，CI 保持双 job success。
+
+## v0.2.2 — CI 全链路修复，APK 构建打通
 
 - **CI 修复链**（连续 5 次失败的根因逐一排除）：
   1. 移除持续故障的第三方 action `android-actions/setup-android@v3`；

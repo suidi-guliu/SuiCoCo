@@ -93,4 +93,4 @@ suicoco 是一款 **原生安卓平板应用**（APK），提供 VSCode 风格�
 - 编辑器为 Compose 文本域 + 语法着色，无 minimap/多光标/撤销树
 - 安装向导原型为模拟执行，真实 debootstrap/apt 需 proot 运行时对接（阶段5）
 - 补全为前缀过滤简版，未接入 LSP
-- native 层 proot/pty 为 JNI 骨架，真实 proot .so 需随包集成（阶段5）
+- native 层（v0.2.7 起）：`:native:proot` 已实现真实 ELF64 arm64 头校验（注入二进制随包自检），`:native:pty` 已实现 `/dev/ptmx` 能力探测；二者保持叶子模块定位。**仍未完成**：真实 proot arm64 二进制随包集成、完整 forkpty 会话链（需 NDK 交叉编译 + arm64 真机验证，阶段5）

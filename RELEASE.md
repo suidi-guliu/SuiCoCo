@@ -1,5 +1,16 @@
 # suicoco 版本记录
 
+## v0.2.8 — 第三方插件导入沙箱校验（阶段6 前置）
+
+> 响应 18:00 巡检日报 P2「第三方 .suicj 导入沙箱校验（严格限定自有格式）」。第三方来源的 .suicj 是不可信输入，本轮把校验从「解压后补救」升级为「解压前拦截」，并修复引擎版本兼容判断的硬编码缺陷。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `SuicjImportPolicy.kt`（core/extengine）**：纯标准库、可独立编译单测的安全判定对象，不依赖 Android/zip4j。提供 `review()` 解压前条目审查（空包 / 条目数 ≤512 / 单文件 ≤16 MiB / 解压总量 ≤32 MiB / 压缩比 >200:1 判为解压炸弹）、`unsafeNameReason()`（拒绝绝对路径、盘符、反斜杠、`..`/`.` 段、双斜杠、NUL/控制字符）、`isSafeMain()`（安全路径且必须 `.js`）、语义化版本比较 `compareVersion()` 与 `isEngineCompatible()`（支持 `*`/精确/`^x.y.z`/`>=x.y.z`，无法解析一律 fail-closed）。
+- **`SuicjPackage.kt` 关键安全修复**：原实现在 `extractAll()` **之后**才 `walkTopDown` 校验路径，此时 zip-slip 恶意文件已写出到目标目录之外、校验形同虚设。改为解压前用 `ZipFile.getFileHeaders()` 映射为 `EntryInfo` 并调用 `review()` 预检，不安全即拒绝、不落盘；解压后再做一次 canonical 路径越界 + 符号链接拒绝的二次防御。
+- **修复真实版本判断 bug**：原 `isVersionSupported()` 硬编码宿主版本 `0.1.0`、`^` 只比 major 导致高 minor 不兼容判断错误；改为接入策略的 `isEngineCompatible()`，宿主版本常量 `HOST_VERSION=0.2.8`，官方插件 `>=0.1.0` 仍兼容、声明 `>=9.9.9`/`^9.x` 的恶意或不兼容插件被拒。
+- **main 入口强化**：从「存在即可」改为「安全路径 + `.js` 后缀 + 必须是普通文件（非目录/非符号链接）」。
+- **`verify-plugin.sh` 对齐**：内嵌 Python 校验补齐与 Kotlin 策略一致的沙箱项（路径穿越/绝对路径/反斜杠/条目数/单文件/总量/压缩比/入口类型/id·version 格式/引擎兼容），CI 与每晚巡检复用同一套判定。
+- **验证**：`SuicjImportPolicy` 经 kotlinc 2.2.20 真实编译并跑 37 项单测全通过；`SuicjPackage`+策略用依赖 stub 完整语义编译零错误（13 class），zip4j `getFileHeaders/getFileName/getUncompressedSize/getCompressedSize/isDirectory` API 经 javap 逐一核对；4 个官方 .suicj 全部通过，6 类自制恶意样本（zip-slip/绝对路径/反斜杠/伪装入口/不兼容引擎/解压炸弹）全部被拒；`bash -n` 通过。APK 编译以 GitHub Actions 为准。
+
 ## v0.2.7 — native 层实体化（ELF 校验 + PTY 能力探测）
 
 > 阶段5 native 去骨架化的第一步：把 `:native:proot` / `:native:pty` 从返回固定字符串的 JNI 骨架，实体化为具备真实能力的实现。仅用标准 C/POSIX 调用，保持 native 叶子模块定位与三条不变量（无 host root / 官方源 / 仅 arm64）。

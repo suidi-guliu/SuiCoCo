@@ -22,6 +22,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,6 +45,7 @@ fun OnboardingWizard(
 ) {
     val state by controller.state.collectAsState()
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     // 有新日志时自动滚动到底部
     LaunchedEffect(state.log.size) {
@@ -148,7 +151,7 @@ fun OnboardingWizard(
         // 操作按钮
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(
-                onClick = { controller.start() },
+                onClick = { scope.launch { controller.start() } },
                 enabled = !state.running,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = VscodeTheme.Accent,

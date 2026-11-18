@@ -18,16 +18,28 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      # ubuntu-latest 预装 Android SDK（$ANDROID_HOME=/usr/local/lib/android/sdk），
-      # 不依赖第三方 setup-android action（该 action 近期持续故障，导致 CI 连续失败）
-      - name: 接受 SDK 许可证并确认 SDK 环境
+      # 自包含安装 Android commandline-tools：不依赖第三方 setup-android action（近期持续故障），
+      # 也不假设 runner 预装的 sdkmanager 在 PATH 中（实测 command not found）
+      - name: 安装 Android SDK cmdline-tools
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          yes | sdkmanager --licenses >/dev/null || true
+          set -e
+          export SDK_ROOT="$RUNNER_TEMP/android-sdk"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          mkdir -p "$SDK_ROOT/cmdline-tools"
+          curl -fsSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline
+          mv /tmp/cmdline/cmdline-tools "$SDK_ROOT/cmdline-tools/latest"
+          export PATH="$SDK_ROOT/cmdline-tools/latest/bin:$PATH"
           sdkmanager --version
 
-      - name: 安装 NDK 与 CMake
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.0.12077973" "cmake;3.31.6"
+      - name: 接受许可证并安装 NDK/CMake/平台
+        run: |
+          set -e
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.0.12077973" "cmake;3.31.6"
 
       - name: 写入 local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties

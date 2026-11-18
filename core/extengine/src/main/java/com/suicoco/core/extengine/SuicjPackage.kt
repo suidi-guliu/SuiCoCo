@@ -53,10 +53,31 @@ object SuicjPackage {
         }
         if (!file.exists() || file.length() == 0L) throw SuicjException("插件文件不存在或为空")
 
+        val zip = ZipFile(file)
+        // 关键安全修复：在解压落盘「之前」审查所有条目（原实现在 extractAll 之后才 walk 校验，
+        // 此时 zip-slip 恶意文件已写出到目标目录之外，校验形同虚设）。
+        val headers = try {
+            zip.fileHeaders
+        } catch (e: Exception) {
+            throw SuicjException("插件包 ZIP 结构非法：${e.message}")
+        }
+        val infos = headers.map { h ->
+            SuicjImportPolicy.EntryInfo(
+                name = h.fileName,
+                uncompressedSize = h.uncompressedSize,
+                compressedSize = h.compressedSize,
+                isDirectory = h.isDirectory
+            )
+        }
+        when (val verdict = SuicjImportPolicy.review(infos)) {
+            is SuicjImportPolicy.Verdict.Reject -> throw SuicjException("插件包未通过安全校验：${verdict.reason}")
+            SuicjImportPolicy.Verdict.Pass -> Unit
+        }
+
         val extractDir = File(workDir, file.nameWithoutExtension + "_" + System.currentTimeMillis())
         extractDir.mkdirs()
         return try {
-            ZipFile(file).extractAll(extractDir.absolutePath)
+            zip.extractAll(extractDir.absolutePath)
             parseAndValidate(extractDir)
         } catch (e: SuicjException) {
             extractDir.deleteRecursively(); throw e
@@ -82,34 +103,30 @@ object SuicjPackage {
         if (manifest.engines.isEmpty() || !manifest.engines.containsKey("suicoco")) {
             throw SuicjException("engines 缺少 suicoco 字段（本插件仅适用于 suicoco）")
         }
-        if (!isVersionSupported(manifest.engines["suicoco"] ?: "")) {
-            throw SuicjException("引擎版本不兼容：需要 suicoco ${manifest.engines["suicoco"]}")
+        if (!SuicjImportPolicy.isEngineCompatible(manifest.engines["suicoco"] ?: "")) {
+            throw SuicjException("引擎版本不兼容：需要 suicoco ${manifest.engines["suicoco"]}（当前 ${SuicjImportPolicy.HOST_VERSION}）")
         }
-        if (!File(dir, manifest.main).exists()) throw SuicjException("main 指向的文件不存在：${manifest.main}")
+        if (!SuicjImportPolicy.isSafeMain(manifest.main)) {
+            throw SuicjException("main 入口非法：必须为安全的 .js 路径（${manifest.main}）")
+        }
+        val mainFile = File(dir, manifest.main)
+        if (!mainFile.exists() || !mainFile.isFile) {
+            throw SuicjException("main 指向的文件不存在或不是普通文件：${manifest.main}")
+        }
 
+        // 二次防御：解压后再次核对落盘路径未越界，且拒绝符号链接（防止 latent zip-slip）。
+        val rootCanonical = dir.canonicalPath
         dir.walkTopDown().forEach { f ->
-            if (!f.canonicalPath.startsWith(dir.canonicalPath)) throw SuicjException("插件包含非法路径（目录穿越）")
+            if (!f.canonicalPath.startsWith(rootCanonical + File.separator) && f.canonicalPath != rootCanonical) {
+                throw SuicjException("插件包含非法路径（目录穿越）：${f.relativeTo(dir)}")
+            }
+            if (java.nio.file.Files.isSymbolicLink(f.toPath())) {
+                throw SuicjException("插件包含符号链接，出于安全考虑拒绝：${f.relativeTo(dir)}")
+            }
         }
 
         val files = dir.walkTopDown().filter { it.isFile }
             .associate { f -> f.relativeTo(dir).path.replace(File.separatorChar, '/') to f.readText() }
         return UnpackedPlugin(manifest, files, dir)
-    }
-
-    private fun isVersionSupported(range: String): Boolean {
-        val r = range.trim()
-        if (r == "*" || r == "0.1.0") return true
-        val current = Triple(0, 1, 0)
-        fun parse(s: String): Triple<Int, Int, Int>? {
-            val nums = s.replace(Regex("[^0-9.]"), "").split(".").mapNotNull { it.toIntOrNull() }
-            return if (nums.size >= 3) Triple(nums[0], nums[1], nums[2]) else null
-        }
-        return when {
-            r.startsWith("^") -> parse(r.removePrefix("^"))?.let { current.first == it.first } ?: false
-            r.startsWith(">=") -> parse(r.removePrefix(">="))?.let {
-                current.first > it.first || (current.first == it.first && current.second >= it.second)
-            } ?: false
-            else -> parse(r)?.let { current == it } ?: false
-        }
     }
 }

@@ -1,5 +1,15 @@
 # suicoco 版本记录
 
+## v0.2.7 — native 层实体化（ELF 校验 + PTY 能力探测）
+
+> 阶段5 native 去骨架化的第一步：把 `:native:proot` / `:native:pty` 从返回固定字符串的 JNI 骨架，实体化为具备真实能力的实现。仅用标准 C/POSIX 调用，保持 native 叶子模块定位与三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **`:native:proot` 实体化**：`proot.cpp` 新增真实 ELF64 头校验——以二进制读取文件头，校验 ELF magic、`ELFCLASS64`、小端字节序、`e_machine == EM_AARCH64(183)`，用于注入的 proot/libproot.so 随包自检；`nativeProotVersion()` 不再伪造二进制版本，改为返回桥实现版本标识。
+- **`ProotBridge.kt` 接口增强**：新增 `nativeValidateElf(path)` / `safeValidateArm64Elf(path)` / `safeVersion()`；native 库不可用时（纯 JVM 测试环境）自动降级为 JVM 侧等价校验（ByteBuffer 解析前 20 字节），避免 `UnsatisfiedLinkError` 崩溃。保留原 `nativeProotVersion()` public API 向后兼容。
+- **`:native:pty` 实体化**：`pty.cpp.nativeAvailable()` 由硬编码 `JNI_TRUE` 改为真实探测 `/dev/ptmx`（`open(O_RDWR|O_CLOEXEC)` + `close`），设备不可用/权限受限时返回 false，供上层决定是否回退到 JVM 进程执行路径；保持 `nativeAvailable(): Boolean` API 不变。
+- **验证**：两个 C++ 文件经 `g++ -std=c++17 -Wall -Wextra -Werror` 严格编译零错误零警告；JNI 签名经 `javac -h` 逐一核对一致；ELF 校验算法用真实 arm64 ELF（termux proot 5.1.107.102）、伪造 x86-64 ELF、垃圾文件、不存在路径四类样本测试，判定全部符合预期，并与 `readelf -h` 交叉验证一致；`bash scripts/verify-plugin.sh` 4 个 .suicj 全部通过；两个安装脚本 `bash -n` 语法通过。
+- **范围说明**：本轮为 native 桥的能力实体化，未随包真实 proot 二进制、未实现完整 forkpty 会话链（需 NDK 交叉编译 + arm64 真机验证，受当前环境限制，留待后续真机阶段）；APK 编译以 GitHub Actions 为准。
+
 ## v0.2.6 — CI 依赖升级（消除 Node 20 deprecated 与 runner 迁移风险）
 
 - **P2 CI 依赖升级**（2026-11-18 12:00 巡检日报新发现项）：

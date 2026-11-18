@@ -18,8 +18,13 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: 设置 Android SDK
-        uses: android-actions/setup-android@v3
+      # ubuntu-latest 预装 Android SDK（$ANDROID_HOME=/usr/local/lib/android/sdk），
+      # 不依赖第三方 setup-android action（该 action 近期持续故障，导致 CI 连续失败）
+      - name: 接受 SDK 许可证并确认 SDK 环境
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --version
 
       - name: 安装 NDK 与 CMake
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.0.12077973" "cmake;3.31.6"

@@ -3,6 +3,7 @@ package com.suicoco.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.suicoco.data.*
+import com.suicoco.core.syntax.CompletionEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -142,13 +143,20 @@ class MainViewModel : ViewModel() {
 
     private fun updateCompletions(path: String, content: String) {
         val lang = languageFor(path) ?: run { _completions.value = emptyList(); return }
-        val prefix = content.substringAfterLast('\n').trim().substringAfterLast(' ')
-        if (prefix.length < 1) { _completions.value = emptyList(); return }
-        val pool = SNIPPETS[lang].orEmpty() + COMMON_WORDS
-        val matches = pool.filter { it.label.startsWith(prefix, ignoreCase = true) }.take(8)
-        _completions.value = matches
+        val (startCol, token) = CompletionEngine.currentToken(content.substringAfterLast('\n'))
+        if (token.length < 1) { _completions.value = emptyList(); return }
+        // 静态词库（关键字 / 片段 / 函数）映射为内核候选
+        val pool = (SNIPPETS[lang].orEmpty() + COMMON_WORDS).map {
+            CompletionEngine.Candidate(it.label, it.kind, it.detail, it.insertText)
+        }
+        // 三级模糊打分 + 文档动态词，替代原 startsWith 纯前缀过滤
+        val matches = CompletionEngine.suggest(token, pool, content, 8)
+        _completions.value = matches.map {
+            CompletionItem(it.label, it.kind, it.detail, it.insertText)
+        }
         val line = content.count { it == '\n' }
-        _completionAnchor.value = line to prefix.length
+        // 记录 token 起始列（bug 修复：原记录 token.length 作为列位置，缩进代码中错位）
+        _completionAnchor.value = line to startCol
     }
 
     fun dismissCompletions() { _completions.value = emptyList() }
@@ -157,12 +165,14 @@ class MainViewModel : ViewModel() {
         val path = _activeTabPath.value ?: return
         val tab = _tabs.value.find { it.path == path } ?: return
         val lines = tab.content.split('\n').toMutableList()
-        val (lineIdx, col) = _completionAnchor.value
+        val (lineIdx, startCol) = _completionAnchor.value
         if (lineIdx in lines.indices) {
             val line = lines[lineIdx]
-            val before = line.substring(0, minOf(col, line.length))
-            val after = line.substring(minOf(col, line.length))
-            lines[lineIdx] = before + item.insertText + after
+            // bug 修复：原用 token.length 作为列位置，缩进/行中补全会插入错位。
+            // 现按 [起始列, token 结束列) 精确替换当前 token 片段。
+            val from = startCol.coerceIn(0, line.length)
+            val to = CompletionEngine.tokenEndFrom(line, from)
+            lines[lineIdx] = line.substring(0, from) + item.insertText + line.substring(to)
             updateContent(path, lines.joinToString("\n"))
         }
         _completions.value = emptyList()

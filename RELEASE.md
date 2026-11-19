@@ -1,5 +1,15 @@
 # suicoco 版本记录
 
+## v0.3.1 — 编辑器增强：补全从前缀过滤升级为智能模糊补全 + 修复插入错位 bug
+
+> 响应 12:00 巡检日报 P2「补全从前缀过滤升级」。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `CompletionEngine.kt`（core:syntax）**：此前 `core:syntax` 为 Placeholder。纯 Kotlin 标准库、无 Android/Compose 依赖、可独立编译单测的补全内核：① 三级模糊打分（精确 > 前缀 > 子串 > 子序列 fuzzy，大小写不敏感，短标签与高价值类型优先）；② 从当前文档已输入标识符动态提取「文档词」作为补全来源（对标 VSCode word-based suggestions）；③ 提供当前 token 提取与替换区间计算。
+- **app 接线**：`MainViewModel.updateCompletions()` 由原 `label.startsWith(prefix)` 纯前缀过滤改为调用内核 `suggest()`（静态词库 + 文档词 + 三级打分）；`SNIPPETS`/`COMMON_WORDS` 词库保持不变，映射为内核候选。
+- **修复真实 bug**：原 `acceptCompletion()` 把 `token.length` 当作光标列位置，在缩进或行中触发补全时插入错位（如 `    pri` + `print` 会变成 `   print pri`）。改为由内核计算 `[token 起始列, token 结束列)` 区间精确替换当前 token，缩进与行尾其它字符均正确保留。
+- **架构**：未改任何依赖，`core:syntax` 仍为叶子 core 模块（app 原已依赖），无回退。
+- **验证**：内核经 kotlinc 2.2.20 独立编译并跑多组单测（精确/前缀/子串/子序列/大小写/文档词/去重/插入区间/缩进 bug 回归）全通过；`bash scripts/verify-plugin.sh` 4 个官方 .suicj 全通过；Compose/APK 编译以 GitHub Actions 为准。
+
 ## v0.3.0 — 阶段6 收尾：第三方导入入口 UI + 仓库地址配置 UI
 
 > 响应 06:00 巡检日报 P0「阶段6 收尾（可本地验证 / CI 安全）」：v0.2.9 已落地校验内核与仓库地址配置内核，但入口 UI 仍为 Placeholder。本轮把第三方 `.suicj` 导入入口与官方仓库地址配置落到真实 UI 并完成 app 层接线，消除死代码。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

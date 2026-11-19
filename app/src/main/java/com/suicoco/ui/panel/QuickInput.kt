@@ -128,7 +128,7 @@ private fun buildQuickItems(vm: MainViewModel, mode: MainViewModel.QuickMode, qu
             installLangPlugin(vm, "java")
         }
         all += QuickItem("📥", "插件: 导入第三方 .suicj") {
-            vm.postNotification("info", "第三方导入需通过系统文件选择器（桌面原型模拟）")
+            vm.openMarketplace()
         }
     }
 

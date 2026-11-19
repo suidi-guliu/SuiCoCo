@@ -37,7 +37,9 @@ fun SideBar(vm: MainViewModel) {
             MainViewModel.ActivityView.SCM -> PlaceholderView("源代码管理", Icons.Default.Source)
             MainViewModel.ActivityView.DEBUG -> PlaceholderView("运行和调试", Icons.Default.PlayArrow)
             MainViewModel.ActivityView.EXTENSIONS -> ExtensionsView(vm)
-            MainViewModel.ActivityView.SETTINGS -> PlaceholderView("设置", Icons.Default.Settings)
+            MainViewModel.ActivityView.SETTINGS -> com.suicoco.feature.settings.SettingsScreen(
+                onOpenWizard = { vm.openWizard() }
+            )
         }
     }
 }
@@ -122,7 +124,7 @@ private fun ExtensionsView(vm: MainViewModel) {
             Text(
                 "官方插件下载 / 第三方 .suicj 导入 →",
                 color = VscodeTheme.Link, fontSize = 12.sp,
-                modifier = Modifier.clickable { vm.openQuick(MainViewModel.QuickMode.COMMAND) }
+                modifier = Modifier.clickable { vm.openMarketplace() }
             )
         }
         LazyColumn(modifier = Modifier.fillMaxSize()) {

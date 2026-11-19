@@ -1,5 +1,15 @@
 # suicoco 版本记录
 
+## v0.3.0 — 阶段6 收尾：第三方导入入口 UI + 仓库地址配置 UI
+
+> 响应 06:00 巡检日报 P0「阶段6 收尾（可本地验证 / CI 安全）」：v0.2.9 已落地校验内核与仓库地址配置内核，但入口 UI 仍为 Placeholder。本轮把第三方 `.suicj` 导入入口与官方仓库地址配置落到真实 UI 并完成 app 层接线，消除死代码。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **第三方导入入口 `feature:marketplace`**：新增 `ImportController`（纯逻辑，复用 `SuicjPackage`/`SuicjImportPolicy` 的完整安全校验，异常一律 fail-closed 映射为拒绝原因）与 `MarketplaceScreen`（VSCode Dark Modern 风格：导入按钮 + 成功摘要 + 拒绝原因展示）。app 层 `PluginMarketplaceOverlay` 用 `ActivityResultContracts.GetContent()` 选文件 → 复制到私有 cache → 交 `ImportController` 校验 → 成功登记到已安装列表（来源标记 `THIRD_PARTY`）。
+- **仓库地址配置 UI `feature:settings`**：新增 `RepositoryConfigController`（纯逻辑，复用 `core:config` 的 `PluginRepositoryConfig`）与 `SettingsScreen`（实时 fail-closed 校验、合法地址显示规范化结果与 `release/suicj-catalog.json` 清单路径）。设置页内保留环境安装向导入口。
+- **app 层接线**：活动栏齿轮 → 设置视图；扩展视图「官方插件下载 / 第三方 .suicj 导入」入口与命令面板「导入第三方 .suicj」→ 插件市场浮层；替换原模拟提示。所有 UI 均可达，无 Placeholder 死代码。
+- **验证**：两个 controller 经 kotlinc 2.2.20 独立编译并跑单测——`RepositoryConfigController` 11 项（合法/仿冒域名/IP/异端口/凭证注入/fragment/ftp/路径穿越）、`ImportController` 6 项（成功映射/非 .suicj/空文件/SuicjException 原因透传/通用异常 fail-closed）全通过；`bash scripts/verify-plugin.sh` 4 个官方 .suicj 全通过；两安装脚本 `bash -n` 通过。Compose 编译以 GitHub Actions 为准。
+- **范围说明**：本轮仅完成 UI 呈现与接线，仓库地址暂未做跨会话持久化（输入框实时校验、合法时按钮可用），如后续需要可接入 DataStore；官方仓库清单下载逻辑留待后续轮次。
+
 ## v0.2.9 — 历史 Release 产物补齐 + 官方插件仓库地址配置（阶段6 前置）
 
 > 响应 23:59 巡检日报 P1「补齐 v0.2.5~v0.2.7 Release assets」与 P2「阶段6 官方插件仓库地址配置」。补齐四个 Release 的可下载产物，并为设置页仓库地址配置落地可 fail-closed 的安全校验内核。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

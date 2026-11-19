@@ -16,6 +16,7 @@ import com.suicoco.ui.panel.SideBar
 import com.suicoco.ui.editor.EditorArea
 import com.suicoco.ui.panel.NotificationHost
 import com.suicoco.ui.panel.InstallWizard
+import com.suicoco.ui.panel.PluginMarketplaceOverlay
 import com.suicoco.viewmodel.MainViewModel
 
 /**
@@ -63,5 +64,6 @@ fun SuicocoShell(vm: MainViewModel) {
         QuickInputOverlay(vm)
         NotificationHost(vm)
         InstallWizard(vm)
+        PluginMarketplaceOverlay(vm)
     }
 }

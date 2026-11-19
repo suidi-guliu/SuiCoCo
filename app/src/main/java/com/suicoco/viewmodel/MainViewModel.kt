@@ -77,6 +77,10 @@ class MainViewModel : ViewModel() {
     // ---- 安装向导 ----
     private val _wizardVisible = MutableStateFlow(false)
     val wizardVisible: StateFlow<Boolean> = _wizardVisible.asStateFlow()
+
+    // ---- 插件市场 / 第三方导入浮层 ----
+    private val _marketplaceVisible = MutableStateFlow(false)
+    val marketplaceVisible: StateFlow<Boolean> = _marketplaceVisible.asStateFlow()
     private val _installSteps = MutableStateFlow(
         listOf(
             InstallStep("rootfs", "下载 Ubuntu 24.04 LTS (ARM64)", "官方源 · proot 运行环境"),
@@ -208,6 +212,9 @@ class MainViewModel : ViewModel() {
 
     fun openWizard() { _wizardVisible.value = true }
     fun closeWizard() { _wizardVisible.value = false }
+
+    fun openMarketplace() { _marketplaceVisible.value = true }
+    fun closeMarketplace() { _marketplaceVisible.value = false }
 
     fun completeStep(stepId: String) {
         _installSteps.value = _installSteps.value.map {

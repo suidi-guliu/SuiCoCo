@@ -92,8 +92,10 @@ fun ActivityBar(vm: MainViewModel) {
 
         Spacer(Modifier.weight(1f))
 
-        // 安装向导入口（齿轮图标）
-        ActIcon(Icons.Default.Settings, "安装向导与设置", false) { vm.openWizard() }
+        // 设置入口（齿轮图标）——设置页内含仓库地址配置与环境安装向导入口
+        ActIcon(Icons.Default.Settings, "设置", current == MainViewModel.ActivityView.SETTINGS) {
+            vm.setActivityView(MainViewModel.ActivityView.SETTINGS)
+        }
         Spacer(Modifier.height(6.dp))
     }
 }

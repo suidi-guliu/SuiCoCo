@@ -112,7 +112,8 @@ bash scripts/verify-plugin.sh release/my-plugin.suicj
 
 ## 8. 安装来源
 
-- **官方插件**：从 GitHub 仓库 `suidi-guliu/SuiCoCo` 的 `release/` 下载，设置中可配置仓库地址。仓库地址由 `core:config` 的 `PluginRepositoryConfig` 校验：仅允许 https、仅信任 github.com / raw / objects.githubusercontent.com 白名单域名、拒绝 IP 字面量与私网/环回地址、拒绝 user:pass 凭证、端口仅允许缺省或 443，非法地址一律拒绝（fail-closed）。插件清单地址为 `<仓库根>/release/suicj-catalog.json`。
+- **官方插件**：从 GitHub 仓库 `suidi-guliu/SuiCoCo` 的 `release/` 下载，设置中可配置仓库地址并跨会话持久化（SharedPreferences，加载/保存均经白名单净化，fail-closed）。仓库地址由 `core:config` 的 `PluginRepositoryConfig` 校验：仅允许 https、仅信任 github.com / raw / objects.githubusercontent.com 白名单域名、拒绝 IP 字面量与私网/环回地址、拒绝 user:pass 凭证、端口仅允许缺省或 443，非法地址一律拒绝（fail-closed）。插件清单地址为 `<仓库根>/release/suicj-catalog.json`。
+- **官方插件清单 `suicj-catalog.json`**：`{"version":1, "name":..., "plugins":[ ... ]}`，每个条目含 `id` / `name` / `version` / `description` / `file`（相对 `release/` 的安全 `.suicj` 文件名）/ `sha256`（下载后校验）/ `engine`（版本范围，规则同 §3）/ `requiresEnv`（cpp/python/java 或 null）。由 `core:config` 的 `PluginCatalog` 解析并 fail-closed 校验（大小/条目数上限、id/文件唯一性、路径穿越拦截、sha256 格式、env 白名单），下载地址经 `PluginRepositoryConfig` 白名单构造。清单解析/校验失败即拒绝，不下载、不安装。
 - **第三方插件**：通过软件内「导入 .suicj」按钮选择本地文件；导入时执行 §7 全部校验，失败即拒绝并提示原因。
 
 ## 9. 安全约束

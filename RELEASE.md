@@ -1,5 +1,15 @@
 # suicoco 版本记录
 
+## v0.3.2 — 阶段6 后续：官方插件仓库清单内核 + 仓库地址跨会话持久化
+
+> 响应 18:00 巡检日报 P0「阶段6 后续功能」。把 v0.3.0 的「输入框实时校验 / 保存按钮占位」升级为「清单可解析、可下载、可校验 + 地址真正落盘」。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `release/suicj-catalog.json`（官方插件清单）**：列出 4 个官方 `.suicj`（hello / C-C++ / Java / Python）的 id、名称、版本、描述、文件名 `file`、真实 SHA256、`engine` 版本范围、`requiresEnv` 依赖环境。清单 URL 由 `PluginRepositoryConfig.catalogUrl()` 构造（`<仓库根>/release/suicj-catalog.json`）。
+- **新增 `PluginCatalog.kt`（core:config，可独立编译单测）**：纯 Kotlin/Java 标准库、无 Android/网络/JSON 三方依赖的清单安全内核。① 自带极简 JSON 解析（递归下降）；② fail-closed 校验：清单大小上限 512 KiB、条目 ≤128、结构版本=1、id 格式/唯一、version 语义化、`file` 必须安全 `.suicj`（拒绝路径穿越/斜杠/反斜杠/控制字符）、SHA256 必须 64 位 hex、engine 范围合法、`requiresEnv` 白名单、file 唯一；③ `downloadUrl()` 复用 `PluginRepositoryConfig` 白名单构造下载地址，`catalogUrl()` 提供清单地址；④ `verifyChecksum()` 常量时间比对 SHA256，`isEngineCompatible()` 支持 `*`/精确/`^`/`>=`。任何非法输入返回 Failure、不抛异常。
+- **仓库地址跨会话持久化（feature:settings）**：`RepositoryConfigController` 增 `normalizeOrNull()`（保存前规范化）与 `sanitizeLoaded()`（加载后再次白名单净化，防篡改存储值注入恶意源）；新增 `RepositoryConfigStore`（SharedPreferences，零新依赖，Android framework API）；`SettingsScreen` 用 `LocalContext` 读取已保存地址回填输入框，「保存」按钮真正落盘并显示「已保存，将在重启后生效」，输入变更清除提示。
+- **验证**：内核经 kotlinc 2.2.20 独立编译 **50 项单测全通过**（解析合法/畸形/超限/重复 id/路径穿越/非法 sha/engine/env、下载 URL 白名单绕过拦截、SHA256 已知向量、引擎兼容矩阵、持久化净化）；真实 `suicj-catalog.json` 经内核解析成功、4 条目 SHA256 与引擎兼容逐一核对一致；`bash scripts/verify-plugin.sh` 4 个官方 .suicj 全通过；两安装脚本 `bash -n` 通过。Compose/APK 编译以 GitHub Actions 为准。
+- **范围说明**：本轮落地清单内核、清单文件与地址持久化；基于清单的「官方插件一键下载 + 自动安装」UI 交互留待后续轮次（内核与下载 URL 已就绪）。
+
 ## v0.3.1 — 编辑器增强：补全从前缀过滤升级为智能模糊补全 + 修复插入错位 bug
 
 > 响应 12:00 巡检日报 P2「补全从前缀过滤升级」。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

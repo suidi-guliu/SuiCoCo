@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -29,16 +30,21 @@ import com.suicoco.core.design.VscodeTheme
 /**
  * 设置面板 —— 官方插件仓库地址配置（VSCode Dark Modern 风格）。
  *
- * 对应 06:00 巡检日报 P0「阶段6 收尾——官方插件仓库地址配置项」。输入实时经
- * [RepositoryConfigController]（复用 core:config 的 PluginRepositoryConfig）做 fail-closed
- * 校验：非法地址显示原因且拒绝保存，合法地址显示规范化结果与插件清单路径。
+ * 对应 06:00 巡检日报 P0「阶段6 收尾——官方插件仓库地址配置项」及 18:00 日报 P0
+ *「阶段6 后续——仓库地址跨会话持久化」。输入实时经 [RepositoryConfigController]
+ *（复用 core:config 的 PluginRepositoryConfig）做 fail-closed 校验：非法地址显示原因且
+ * 拒绝保存，合法地址显示规范化结果与插件清单路径；点「保存」经 [RepositoryConfigStore]
+ * 落盘，跨会话（杀进程重启）后由 [RepositoryConfigStore.load] 经白名单净化后回填。
  */
 @Composable
 fun SettingsScreen(
     onOpenWizard: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var input by remember { mutableStateOf(RepositoryConfigController.defaultUrl()) }
+    val context = LocalContext.current
+    val store = remember { RepositoryConfigStore(context) }
+    var input by remember { mutableStateOf(store.load()) }
+    var saved by remember { mutableStateOf(false) }
     val result = remember(input) { RepositoryConfigController.validate(input) }
 
     Column(
@@ -61,7 +67,7 @@ fun SettingsScreen(
         // 输入框
         BasicTextField(
             value = input,
-            onValueChange = { input = it },
+            onValueChange = { input = it; saved = false },
             modifier = Modifier
                 .fillMaxWidth()
                 .background(VscodeTheme.InputBg, RoundedCornerShape(4.dp))
@@ -96,9 +102,16 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(6.dp))
+        if (saved) {
+            Text("✓ 已保存，将在重启后生效", color = VscodeTheme.Green, fontSize = 10.sp)
+            Spacer(Modifier.height(6.dp))
+        }
         Button(
-            onClick = { /* 校验已在输入时实时完成；合法地址由宿主持久化时读取 result */ },
+            onClick = {
+                val ok = result as? RepositoryConfigController.FieldResult.Ok
+                if (ok != null && store.save(ok.normalizedUrl)) saved = true
+            },
             enabled = result is RepositoryConfigController.FieldResult.Ok,
             colors = ButtonDefaults.buttonColors(
                 containerColor = VscodeTheme.Accent,

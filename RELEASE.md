@@ -1,5 +1,15 @@
 # suicoco 版本记录
 
+## v0.3.3 — 发布一致性补齐：v0.3.1 / v0.3.2 补建 tag+Release，v0.3.0 补挂 APK
+
+> 响应 2026-11-19 23:59 巡检日报 P0「补建 v0.3.1 tag/release」与「补挂 v0.3.0 APK asset」。本轮为发布运维，无源码变更，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **补建 tag / Release**：为 `6df8436`（v0.3.1 编辑器增强）创建 tag `v0.3.1` + Release（id 451986193），为 `6a362aeb`（v0.3.2 阶段6 后续）创建 tag `v0.3.2` + Release（id 451986266）；两者各附 5 个产物（`app-debug.apk` + hello/C-C++/Java/Python 四个 `.suicj`）。
+- **补挂历史 APK**：为 v0.3.0 Release（id 450880483）补挂 `app-debug.apk`，此前其仅含 4 个 `.suicj`。至此 **v0.3.0 / v0.3.1 / v0.3.2 三个 Release 均具备 5 个可下载产物**，与 v0.2.2~v0.2.9 一致。
+- **产物取证**：三个 APK 分别取自对应 success 的 CI run（v0.3.0 RUN 44458174373 / v0.3.1 RUN 44502837159 / v0.3.2 RUN 44563216331），逐一 `unzip -t` 通过、含 `AndroidManifest.xml` 与 `classes.dex`，大小递增（60,394,411 / 60,411,287 / 60,435,999 字节）与各自源码提交对应；四个 `.suicj` 经 `verify-plugin.sh` 全部通过。
+- **版本一致性**：RELEASE.md / tag / Release 三处对齐至 v0.3.2 源码 + v0.3.3 发布运维记录，消除日报头号阻塞项「RELEASE.md 记 v0.3.x 但 tag/release 停在 v0.3.0」。
+- **未闭环项**：native 完整实体化（真实 arm64 proot 二进制随包 + 完整 forkpty 会话链）需 NDK 交叉编译 + arm64 真机，本地无 SDK/NDK/真机且 seccomp 限制嵌套 ptrace，阻塞；阶段4/5/6 assignee 因项目成员仅所有者一人，无法指派；proot 端到端真机验证无设备；编辑器 LSP/DAP、minimap、多光标、撤销树及 `jvmTarget` DSL 迁移工程量大 / 无法本地编译验证，留待后续。
+
 ## v0.3.2 — 阶段6 后续：官方插件仓库清单内核 + 仓库地址跨会话持久化
 
 > 响应 18:00 巡检日报 P0「阶段6 后续功能」。把 v0.3.0 的「输入框实时校验 / 保存按钮占位」升级为「清单可解析、可下载、可校验 + 地址真正落盘」。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

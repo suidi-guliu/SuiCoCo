@@ -28,6 +28,9 @@ jobs:
           python3 scripts/embed-plugins.py
           for d in plugins/*/; do bash scripts/build-plugin.sh "$d"; done
           bash scripts/verify-plugin.sh
+          # 关键：zip -r 会写入 mtime，重打包后字节/SHA256 变化；按真实产物回写清单摘要，
+          # 保证「一键下载 + SHA256 校验」永远与用户实际下载到的字节一致（否则全部安装被拒）。
+          python3 scripts/sync-catalog-sha.py
 
       - name: 提交构建产物
         run: |

@@ -91,6 +91,6 @@ suicoco 是一款 **原生安卓平板应用**（APK），提供 VSCode 风格�
 > 阶段定位说明（2026-11-18 修订）：阶段5 已由「Electron 桌面壳」修订为「安卓 proot 运行时与真实环境安装对接」——随 v0.2.0 方向修正，Electron/Web 原型（`legacy-web-prototype/`）已弃用，真实安装执行载体为本 APK 内的 proot PTY（`:core:distro` + `:native:proot` / `:native:pty`）。
 
 - 编辑器为 Compose 文本域 + 语法着色，无 minimap/多光标/撤销树
-- 安装向导原型为模拟执行，真实 debootstrap/apt 需 proot 运行时对接（阶段5）
-- 补全为前缀过滤简版，未接入 LSP
+- 安装向导（v0.2.5 起）为**真实执行**：`ProcessRunner` 通过 `ProotManager.buildCommand` 产生 argv，用 `ProcessBuilder` 在 proot 用户空间真实执行 debootstrap/apt 与工具链安装，逐行回传日志并支持取消；向导由 `InstallerController` 编排（下载→解压→更新源→装工具链）。真实 proot arm64 二进制随包仍属阶段5 余项。
+- 补全（v0.3.1 起）为 `CompletionEngine` **智能模糊补全**：三级打分（精确 > 前缀 > 子序列 fuzzy）、候选类型加权、动态文档词提取、光标 token 区间计算，替代原 `startsWith` 纯前缀过滤；仍未接入 LSP（P2 余项）。
 - native 层（v0.2.7 起）：`:native:proot` 已实现真实 ELF64 arm64 头校验（注入二进制随包自检），`:native:pty` 已实现 `/dev/ptmx` 能力探测；二者保持叶子模块定位。**仍未完成**：真实 proot arm64 二进制随包集成、完整 forkpty 会话链（需 NDK 交叉编译 + arm64 真机验证，阶段5）

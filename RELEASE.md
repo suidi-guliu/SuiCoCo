@@ -1,5 +1,15 @@
 # suicoco 版本记录
 
+## v0.3.6 — native/pty 实体化：arm64 forkpty 伪终端会话链（8 JNI 方法）
+
+> 响应 2026-11-20 23:59 巡检日报 P0「native 完整实体化」中唯一不依赖真机/NDK 运行时的可落地部分。保持三条不变量（无 host root / 官方源 / 仅 arm64）。属分阶段推进：本轮落地 PTY 会话链，真实 arm64 proot 二进制随包仍待 NDK 交叉编译 + 真机验证。
+
+- **`native/pty/src/main/cpp/pty.cpp` 从「仅探测 /dev/ptmx」升级为真实 forkpty 会话链**，补齐 8 个 JNI 方法：① `nativeAvailable`（PTY 设备探测，保留）；② `nativeOpen(cols,rows,argv)` 以 `forkpty` 创建伪终端并在子进程 `execvp` 调用方传入的 argv；③ `nativeWrite` 向 master 写输入；④ `nativeRead` 用 `poll` 非阻塞读输出（短超时，避免 JNI 线程 hang，EIO 视为从端关闭）；⑤ `nativeResize` 走 `TIOCSWINSZ` 同步窗口尺寸；⑥ `nativeIsAlive` 以 `waitpid(WNOHANG)` 非阻塞探测并回收；⑦ `nativeWait` 阻塞等待并解析退出码；⑧ `nativeClose` 关闭 master + SIGHUP/SIGKILL 回收子进程，杜绝 fd 泄漏与僵尸进程。
+- **安全不变量**：全局会话表 `unordered_map<id, shared_ptr<Session>>` 由 mutex 保护；argv 解析 fail-closed（任一元素异常整体拒绝）；本桥只执行调用方 argv、不自行提权、不注入命令，no-root 约束继续由上层 ProotManager 保证；master 设 `O_NONBLOCK`，输出读取由上层循环驱动。
+- **`PtyBridge.kt` 补全 8 个 external 声明 + JVM 降级入口**：`safeAvailable()` / `safeOpen()` 在 native 库加载失败（纯 JVM 测试环境）时降级为 `/dev/ptmx` 探测与 `-1`，避免 `UnsatisfiedLinkError` 崩溃；`isNativeLoaded()` 供上层决定路径。此前该类仅有一个 `nativeAvailable`，`init{}` 直接 `loadLibrary` 会在 JVM 环境抛异常，本轮一并修复。
+- **验证**：C++ 会话链经本地 `g++ -std=c++17 -fsyntax-only`（真实 jni.h + android/log.h mock）语法检查通过；Kotlin 侧经 kotlinc 2.2.20 独立编译通过；JNI 方法名/签名与 Kotlin external 声明逐一核对匹配。完整 Compose/APK 编译以 GitHub Actions 为准。**未做 arm64 真机端到端验证**（当前无真机、无 NDK 本地交叉编译环境）。
+- **未闭环（仍阻塞）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH 补丁）需 NDK 交叉编译 + arm64 真机，维持阻塞；PTY 会话链到 `ProcessRunner` 的接线属阶段5，待 proot 实体化后一并接通。
+
 ## v0.3.5 — 设计文档同步：修正已知限制滞后状态（P1）
 
 > 响应 2026-11-20 18:00 巡检日报 P1「同步设计文档滞后状态」。本轮为文档同步，无源码/功能变更，保持三条不变量（无 host root / 官方源 / 仅 arm64）。

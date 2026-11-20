@@ -1,5 +1,15 @@
 # suicoco 版本记录
 
+## v0.3.4 — 阶段6 收官：官方插件「一键下载 + 自动安装」闭环 + 修复清单摘要失配
+
+> 响应 2026-11-20 06:03 巡检日报 P0「基于清单的官方插件一键下载 + 自动安装 UI 交互（内核与 downloadUrl() 已就绪，UI 未接）」。这是 v0.3.2 RELEASE.md 明确留待后续的阶段6 最后余项，本轮首次真正接通。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `OfficialInstallController.kt`（feature:marketplace，可独立编译单测）**：编排内核——① `loadCatalog()` 把清单解析为展示条目并按宿主版本标注引擎兼容；② `resolveDownloadUrl()` / `resolveCatalogUrl()` 先复用 `PluginCatalog` 的文件名与仓库白名单校验，再把 github.com 网页 URL 安全转换为 raw.githubusercontent.com 二进制直链（**修复网页 URL 直接下载只得到 HTML 的真实缺陷**）；③ `fetchWithGuardedRedirects()` 受控重定向状态机，每次跟随前用 `isAllowedDownloadTarget()` 做白名单判定，杜绝「官方源 302 到内网/仿冒站」的 SSRF；④ `verifyDownloaded()` 复用内核常量时间 SHA-256 比对；⑤ `networkFetch()` 基于标准库 HttpURLConnection、关闭自动重定向。全程 fail-closed，不抛异常。
+- **UI 接线 `MarketplaceScreen` + `PluginMarketplaceOverlay`**：市场面板新增官方插件清单（名称/版本/描述/依赖环境/引擎兼容标记）与「一键安装」按钮、清单刷新与安装反馈；浮层读取跨会话持久化的仓库地址，在 IO 线程执行「加载清单 → 点安装 → 受控下载 → SHA256 校验 → 复用 `ImportController` 完整安全校验 → 登记为 OFFICIAL」。第三方导入链路保持不变，业务规则不重复实现（单一真源 SuicjImportPolicy / OfficialInstallController）。
+- **修复真实 bug：清单 SHA256 失配导致一键安装必然全被拒**。根因：`build-plugin.sh` 用 `zip -r` 打包会写入 mtime，CI 每次 `[skip ci]` 重打包后 `.suicj` 字节/SHA256 都变，而清单摘要写死不变。本轮按仓库真实产物回写 `release/suicj-catalog.json` 四个摘要；并新增 `scripts/sync-catalog-sha.py`，在 `build-plugins.yml` 打包后自动按真实产物回写清单摘要——从此「清单摘要 == 用户实际下载字节」长期自洽，不再随重打包漂移。
+- **依赖**：`feature:marketplace` 增加 `implementation(project(":core:config"))`（feature→core，无架构回退；core 不依赖 feature）。
+- **验证**：`OfficialInstallController` 经 kotlinc 2.2.20 独立编译并运行 **45 项单测全通过**（清单解析/引擎过滤/网页→raw 转换/路径穿越与非法文件名拒绝/SSRF 重定向拦截/重定向环上限/取数异常 fail-closed/SHA256 真实插件字节与篡改样本）；发现并修复 raw URL 漏 `release/` 段的真实 bug；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过（用在线真实字节）；全部安装脚本 `bash -n` 通过。Compose/APK 编译以 GitHub Actions 为准。
+
 ## v0.3.3 — 发布一致性补齐：v0.3.1 / v0.3.2 补建 tag+Release，v0.3.0 补挂 APK
 
 > 响应 2026-11-19 23:59 巡检日报 P0「补建 v0.3.1 tag/release」与「补挂 v0.3.0 APK asset」。本轮为发布运维，无源码变更，保持三条不变量（无 host root / 官方源 / 仅 arm64）。

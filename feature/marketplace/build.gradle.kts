@@ -28,4 +28,5 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(project(":core:extengine"))
     implementation(project(":core:design"))
+    implementation(project(":core:config"))
 }

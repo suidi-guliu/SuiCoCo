@@ -1,5 +1,13 @@
 # suicoco 版本记录
 
+## v0.3.5 — 设计文档同步：修正已知限制滞后状态（P1）
+
+> 响应 2026-11-20 18:00 巡检日报 P1「同步设计文档滞后状态」。本轮为文档同步，无源码/功能变更，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **`docs/ARCHITECTURE.md` §7 修正两处滞后描述**：①「安装向导原型为模拟执行」→ 更新为 v0.2.5 起 `ProcessRunner`+`InstallerController` 真实执行（proot 用户空间跑 debootstrap/apt，逐行日志、可取消）；②「补全为前缀过滤简版」→ 更新为 v0.3.1 起 `CompletionEngine` 智能模糊补全（三级打分/类型加权/文档词提取/token 区间计算），但仍未接入 LSP（P2 余项）。二者此前与已落地代码冲突，会误导开发者。
+- **`docs/PLUGIN_SPEC.md` §8 补充一键安装闭环与清单 SHA 自洽机制**：新增 v0.3.4 官方插件「一键下载 + 自动安装」编排链路（含网页 URL→raw 直链、受控重定向 SSRF 防护、SHA256 校验、复用导入校验、登记 OFFICIAL）与 `scripts/sync-catalog-sha.py` 摘要回写机制说明，与 v0.3.4 实际代码对齐。
+- **验证**：`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过；文档为纯 Markdown 变更，无 APK/插件字节改动，构建以在线 Actions 为准。
+
 ## v0.3.4 — 阶段6 收官：官方插件「一键下载 + 自动安装」闭环 + 修复清单摘要失配
 
 > 响应 2026-11-20 06:03 巡检日报 P0「基于清单的官方插件一键下载 + 自动安装 UI 交互（内核与 downloadUrl() 已就绪，UI 未接）」。这是 v0.3.2 RELEASE.md 明确留待后续的阶段6 最后余项，本轮首次真正接通。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

@@ -115,6 +115,8 @@ bash scripts/verify-plugin.sh release/my-plugin.suicj
 - **官方插件**：从 GitHub 仓库 `suidi-guliu/SuiCoCo` 的 `release/` 下载，设置中可配置仓库地址并跨会话持久化（SharedPreferences，加载/保存均经白名单净化，fail-closed）。仓库地址由 `core:config` 的 `PluginRepositoryConfig` 校验：仅允许 https、仅信任 github.com / raw / objects.githubusercontent.com 白名单域名、拒绝 IP 字面量与私网/环回地址、拒绝 user:pass 凭证、端口仅允许缺省或 443，非法地址一律拒绝（fail-closed）。插件清单地址为 `<仓库根>/release/suicj-catalog.json`。
 - **官方插件清单 `suicj-catalog.json`**：`{"version":1, "name":..., "plugins":[ ... ]}`，每个条目含 `id` / `name` / `version` / `description` / `file`（相对 `release/` 的安全 `.suicj` 文件名）/ `sha256`（下载后校验）/ `engine`（版本范围，规则同 §3）/ `requiresEnv`（cpp/python/java 或 null）。由 `core:config` 的 `PluginCatalog` 解析并 fail-closed 校验（大小/条目数上限、id/文件唯一性、路径穿越拦截、sha256 格式、env 白名单），下载地址经 `PluginRepositoryConfig` 白名单构造。清单解析/校验失败即拒绝，不下载、不安装。
 - **第三方插件**：通过软件内「导入 .suicj」按钮选择本地文件；导入时执行 §7 全部校验，失败即拒绝并提示原因。
+- **一键下载 + 自动安装（v0.3.4 起）**：官方插件在市场面板 `MarketplaceScreen` 展示清单条目（名称/版本/描述/依赖环境/引擎兼容标记），点「一键安装」由 `OfficialInstallController` 编排：加载清单 → 把 github.com 网页 URL 安全转换为 raw.githubusercontent.com 二进制直链 → 受控重定向（每跳按 `PluginRepositoryConfig` 白名单复检，拒绝 SSRF/重定向环）→ 下载字节按清单 `sha256` 常量时间比对 → 复用 `ImportController` 的 §7 全部安全校验 → 登记为 OFFICIAL；全程 fail-closed，不抛异常。第三方导入链路不变，业务规则单一真源，不重复实现。
+- **清单 SHA256 自洽机制**：`build-plugin.sh` 的 `zip -r` 会写入 mtime，导致 CI `[skip ci]` 重打包后 `.suicj` 字节/摘要漂移。由 `scripts/sync-catalog-sha.py` 在 `build-plugins.yml` 打包后按真实产物回写 `suicj-catalog.json` 的各 `sha256`，确保「清单摘要 == 用户实际下载字节」长期一致，避免摘要失配导致一键安装必然被拒。
 
 ## 9. 安全约束
 

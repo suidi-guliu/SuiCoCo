@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.suicoco.data.*
 import com.suicoco.core.syntax.CompletionEngine
+import com.suicoco.core.editor.UndoTree
 import com.suicoco.terminal.TerminalCommandExecutor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -67,6 +68,19 @@ class MainViewModel : ViewModel() {
     private val _completionAnchor = MutableStateFlow<Pair<Int, Int>>(0 to 0) // line, column
     val completionAnchor: StateFlow<Pair<Int, Int>> = _completionAnchor.asStateFlow()
 
+    // ---- 撤销树（每个标签页一棵，app 层持有；内核在 core:editor）----
+    /** path -> 该标签的撤销树；连续输入合并，撤销后再编辑形成分支。 */
+    private val undoHistories = HashMap<String, UndoTree>()
+    /** 当前活动标签是否可撤销/可重做，供 UI 启用/禁用按钮。 */
+    private val _undoState = MutableStateFlow(Pair(false, false)) // canUndo, canRedo
+    val undoState: StateFlow<Pair<Boolean, Boolean>> = _undoState.asStateFlow()
+
+    private fun refreshUndoState() {
+        val path = _activeTabPath.value
+        val tree = path?.let { undoHistories[it] }
+        _undoState.value = Pair(tree?.canUndo() ?: false, tree?.canRedo() ?: false)
+    }
+
     // ---- 诊断 ----
     private val _diagnostics = MutableStateFlow<List<Diagnostic>>(emptyList())
     val diagnostics: StateFlow<List<Diagnostic>> = _diagnostics.asStateFlow()
@@ -118,6 +132,7 @@ class MainViewModel : ViewModel() {
     fun openFile(path: String) {
         _tabs.value.find { it.path == path }?.let {
             _activeTabPath.value = path
+            refreshUndoState()
             return
         }
         val node = findNode(_fileTree.value, path)
@@ -127,6 +142,9 @@ class MainViewModel : ViewModel() {
         val tab = EditorTab(path, name, content, lang)
         _tabs.value = _tabs.value + tab
         _activeTabPath.value = path
+        // 首次打开：以初始内容作为撤销树根节点（幂等，重复打开不重建）
+        if (!undoHistories.containsKey(path)) undoHistories[path] = UndoTree(content)
+        refreshUndoState()
         val current = _envInstalled.value
         // 环境守卫：语言插件未装时提示（不拦截编辑，只拦截运行）
         if (lang != null && lang !in current && lang in setOf("c", "cpp", "python", "java")) {
@@ -137,13 +155,38 @@ class MainViewModel : ViewModel() {
     fun closeTab(path: String) {
         val list = _tabs.value.filter { it.path != path }
         _tabs.value = list
+        undoHistories.remove(path)
         if (_activeTabPath.value == path) {
             _activeTabPath.value = list.lastOrNull()?.path
+            refreshUndoState()
         }
     }
 
     fun updateContent(path: String, content: String) {
         _tabs.value = _tabs.value.map { if (it.path == path) it.copy(content = content, dirty = true) else it }
+        // 记录编辑快照（连续普通输入合并为一个撤销步骤）
+        undoHistories.getOrPut(path) { UndoTree(content) }.recordTyped(content)
+        refreshUndoState()
+        updateCompletions(path, content)
+    }
+
+    /** 撤销当前活动标签：取父节点内容回填，并同步补全/撤销状态。 */
+    fun undo() {
+        val path = _activeTabPath.value ?: return
+        val tree = undoHistories[path] ?: return
+        val content = tree.undo() ?: return
+        _tabs.value = _tabs.value.map { if (it.path == path) it.copy(content = content, dirty = true) else it }
+        refreshUndoState()
+        updateCompletions(path, content)
+    }
+
+    /** 重做当前活动标签：取最近访问的子分支内容回填。 */
+    fun redo() {
+        val path = _activeTabPath.value ?: return
+        val tree = undoHistories[path] ?: return
+        val content = tree.redo() ?: return
+        _tabs.value = _tabs.value.map { if (it.path == path) it.copy(content = content, dirty = true) else it }
+        refreshUndoState()
         updateCompletions(path, content)
     }
 

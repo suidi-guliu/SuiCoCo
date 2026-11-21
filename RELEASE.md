@@ -1,5 +1,14 @@
 # suicoco 版本记录
 
+## v0.3.7 — native/pty 会话编排内核：裸 JNI 桥升级为 fail-closed 会话 API + 进程降级
+
+> 响应 2026-11-21 05:59 巡检日报 P0「native 完整实体化」历轮延续项。v0.3.6 已落地 forkpty 的 8 个 JNI 方法，但 PtyBridge 仍是「裸桥」——native 库加载失败时 `safeOpen` 直接返回 -1、上层无法真正执行命令，且无会话生命周期管理。本轮补齐会话编排内核，属阶段5 的可离线落地部分。保持三条不变量（无 host root / 官方源 / 仅 arm64）。真实 proot 二进制随包仍待 NDK 交叉编译 + 真机验证。
+
+- **新增 `native/pty/.../PtySessionController.kt`（纯 Kotlin/JDK 标准库，可独立编译单测）**：把 PtyBridge 的 8 个 JNI 方法封装为生命周期安全的高层会话 API。① **统一句柄**：调用方拿到内核分配的单调递增 handle，内部映射到 native sid 或降级进程，永不暴露裸 sid，杜绝跨会话串扰与重复 close；② **native 优先 + 进程降级**：native 可用走 forkpty；不可用时降级到 `ProcessBuilder(argv)`（不经 shell、不拼接字符串、argv 逐元素传入，杜绝命令注入），使上层在纯 JVM / 未打包 .so 环境也能真实执行命令而非得到 -1；③ **fail-closed**：空 argv / 空元素 / 含 NUL 一律拒绝；每个 JNI 调用与 `available()` 均做异常兜底，JNI 抛异常时降级到进程路径而非崩溃；④ **幂等 close**：重复关闭返回 true、回收子进程、`closeAll()` 批量清理。降级路径 pump 线程非阻塞分块读 stdout/stderr、直写 stdin、waitFor 返回退出码。
+- **依赖与架构**：新增类位于既有 `native:pty` 叶子模块（app 已依赖），零新依赖、无 Android/Compose/三方引用，core 不依赖 feature 的约束不变；只执行调用方 argv、不提权、不注入命令，no-root 仍由上层 `ProotManager.assertNoHostRoot` 保证。
+- **验证**：PtySessionController + PtyBridge 经 kotlinc 2.2.20 独立编译（生成可执行 jar），**30 项单测全通过**（参数 fail-closed / native 委托读写-resize-isAlive-wait / 句柄与 sid 解耦 / 幂等 close / JNI 抛异常降级为真实进程且读到输出 / 纯 native 不可用降级 / 多会话隔离 / closeAll / 异常兜底）；单测过程中发现并修复两处真实健壮性缺口（`open`/`available` 未吞 JNI 异常，已补 try-catch 降级）。`pty.cpp` / `proot.cpp` 经 `g++ -std=c++17 -fsyntax-only -Wall`（补全 JNI mock）语法检查通过；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过；全部 `scripts/*.sh` `bash -n` 通过。完整 Compose/APK 编译以 GitHub Actions 为准。
+- **未闭环（仍阻塞）**：会话编排内核到终端 UI（`MainViewModel.execTerminalCommand` 当前仍为模拟响应）与 `ProcessRunner` 的接线属阶段5 后续，待 proot 实体化后一并接通；真实 arm64 proot 二进制随包（SHA256 + RUNPATH 补丁）需 NDK 交叉编译 + arm64 真机，维持阻塞。
+
 ## v0.3.6 — native/pty 实体化：arm64 forkpty 伪终端会话链（8 JNI 方法）
 
 > 响应 2026-11-20 23:59 巡检日报 P0「native 完整实体化」中唯一不依赖真机/NDK 运行时的可落地部分。保持三条不变量（无 host root / 官方源 / 仅 arm64）。属分阶段推进：本轮落地 PTY 会话链，真实 arm64 proot 二进制随包仍待 NDK 交叉编译 + 真机验证。

@@ -4,6 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.suicoco.data.*
 import com.suicoco.core.syntax.CompletionEngine
+import com.suicoco.terminal.TerminalCommandExecutor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,6 +19,9 @@ import kotlinx.coroutines.flow.SharingStarted
  * 工作台主状态机 — 对标 JCode 的 MainViewModel，管理编辑器/终端/面板/插件全部交互状态。
  */
 class MainViewModel : ViewModel() {
+
+    /** 终端命令执行器（PTY 会话内核的 app 层适配）。native 优先、不可用时自动降级进程。 */
+    private val terminalExecutor = TerminalCommandExecutor()
 
     // ---- 活动栏 ----
     enum class ActivityView { EXPLORER, SEARCH, SCM, DEBUG, EXTENSIONS, SETTINGS }
@@ -192,19 +198,48 @@ class MainViewModel : ViewModel() {
         togglePanel(true)
     }
 
+    /**
+     * 执行终端命令：经 [TerminalCommandExecutor] 真实执行（PTY 会话 / 进程降级）。
+     * 内置 help/clear 仍本地处理；其余命令分词后走会话内核，逐行回传真实输出。
+     * 执行在 IO 线程进行，输出回调切回主线程更新 StateFlow。
+     */
     fun execTerminalCommand(cmd: String) {
         appendTerminal("$ $cmd", TerminalLine.Kind.COMMAND)
-        when (cmd.trim()) {
-            "help" -> appendTerminal("可用命令: help, clear, ls, pwd, gcc --version, python3 --version, java -version", TerminalLine.Kind.OUT)
-            "clear" -> _terminalLines.value = emptyList()
-            "pwd" -> appendTerminal("/workspace", TerminalLine.Kind.OUT)
-            "ls" -> appendTerminal("main.cpp  app.py  Main.java  README.md", TerminalLine.Kind.OUT)
-            else -> appendTerminal("[suicoco] 命令需 proot 运行时支持：$cmd", TerminalLine.Kind.INFO)
+        val trimmed = cmd.trim()
+        when (trimmed) {
+            "help" -> {
+                appendTerminal("可用命令: help, clear 及任意 proot 环境内命令（如 ls / pwd / gcc --version）", TerminalLine.Kind.OUT)
+                return
+            }
+            "clear" -> { _terminalLines.value = emptyList(); return }
+        }
+        val argv = terminalExecutor.tokenize(trimmed)
+        if (argv == null) {
+            appendTerminal("[suicoco] 命令词法错误（引号未闭合或空命令）", TerminalLine.Kind.ERR)
+            return
+        }
+        val mode = if (terminalExecutor.sessionAvailable()) "native PTY" else "进程降级"
+        appendTerminal("[suicoco] 会话模式: $mode", TerminalLine.Kind.INFO)
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = terminalExecutor.execute(argv) { line ->
+                appendTerminal(line, TerminalLine.Kind.OUT)
+            }
+            when {
+                result.rejected -> appendTerminal("[suicoco] 命令被拒绝：违反无-root 约束或参数非法", TerminalLine.Kind.ERR)
+                result.exitCode != 0 -> appendTerminal("[suicoco] 退出码 ${result.exitCode}", TerminalLine.Kind.ERR)
+                result.lines.isEmpty() && result.success -> appendTerminal("[suicoco] 执行完成（无输出）", TerminalLine.Kind.SUCCESS)
+            }
         }
     }
 
     private fun appendTerminal(text: String, kind: TerminalLine.Kind) {
         _terminalLines.value = _terminalLines.value + TerminalLine(text, kind)
+    }
+
+    /** 释放终端会话资源（ViewModel 清理时调用）。 */
+    override fun onCleared() {
+        terminalExecutor.closeAll()
+        super.onCleared()
     }
 
     fun togglePanel(show: Boolean? = null) {

@@ -1,5 +1,14 @@
 # suicoco 版本记录
 
+## v0.3.9 — 构建脚本现代化：jvmTarget 从废弃 kotlinOptions 迁移到 compilerOptions DSL
+
+> 响应 2026-11-21 17:59 巡检日报 P2「各模块 build.gradle.kts 的 jvmTarget 迁至 compilerOptions DSL」。KGP 2.2.20 / AGP 8.13.0 下 `android { kotlinOptions { jvmTarget = "21" } }` 已废弃，本轮统一迁移到官方推荐的 `kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_21) } }`。语义等价、零功能变更，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **20 个模块构建脚本统一迁移**：`app`、`core:*`（11 个）、`feature:*`（6 个）、`native/proot`、`native/pty`，共 20 个含 `jvmTarget` 的 `build.gradle.kts`，把 `android { kotlinOptions { jvmTarget = "21" } }` 迁移为顶层 `kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21) } }`。使用 fully-qualified 类名避免 import 顺序问题；迁移前后 `{}`/`()` 括号平衡校验通过，未改动任何 dependencies / namespace / compileOptions / native 配置。
+- **语义等价性**：原 `jvmTarget = "21"` 与新 `JvmTarget.JVM_21` 均为 Java 21 目标字节码，与 `compileOptions` 的 `VERSION_21` 保持一致；新 DSL 为 KGP 1.9.20+ 稳定 API，对 Android 全部 compilation 生效，消除废弃 API 告警。
+- **验证**：20 个文件替换计数与残留检查通过（`kotlinOptions` 全部清除）、括号平衡校验通过；完整 Compose/APK 编译以 GitHub Actions 为准。
+- **未闭环（仍阻塞）**：真实 arm64 proot 二进制随包、终端向导复用与真机端到端验收维持阻塞（需 NDK 交叉编译 + arm64 平板），与历轮一致。
+
 ## v0.3.8 — PTY 会话内核接入终端执行层：模拟响应升级为真实命令执行
 
 > 响应 2026-11-21 12:00 巡检日报 P0「PTY 会话链接线到进程执行层」+ P1「同步设计文档滞后状态」。v0.3.7 已落地会话编排内核但终端 UI 仍是模拟响应，本轮把内核接到命令执行层，属阶段5 可离线落地部分。保持三条不变量（无 host root / 官方源 / 仅 arm64）。接线位于 app 层，native 叶子模块定位与 core 不依赖 feature 的约束均不变。

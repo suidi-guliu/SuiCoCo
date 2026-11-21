@@ -93,4 +93,4 @@ suicoco 是一款 **原生安卓平板应用**（APK），提供 VSCode 风格�
 - 编辑器为 Compose 文本域 + 语法着色，无 minimap/多光标/撤销树
 - 安装向导（v0.2.5 起）为**真实执行**：`ProcessRunner` 通过 `ProotManager.buildCommand` 产生 argv，用 `ProcessBuilder` 在 proot 用户空间真实执行 debootstrap/apt 与工具链安装，逐行回传日志并支持取消；向导由 `InstallerController` 编排（下载→解压→更新源→装工具链）。真实 proot arm64 二进制随包仍属阶段5 余项。
 - 补全（v0.3.1 起）为 `CompletionEngine` **智能模糊补全**：三级打分（精确 > 前缀 > 子序列 fuzzy）、候选类型加权、动态文档词提取、光标 token 区间计算，替代原 `startsWith` 纯前缀过滤；仍未接入 LSP（P2 余项）。
-- native 层（v0.2.7 起）：`:native:proot` 已实现真实 ELF64 arm64 头校验（注入二进制随包自检），`:native:pty` 已实现 `/dev/ptmx` 能力探测；二者保持叶子模块定位。**仍未完成**：真实 proot arm64 二进制随包集成、完整 forkpty 会话链（需 NDK 交叉编译 + arm64 真机验证，阶段5）
+- native 层（v0.2.7 起）：`:native:proot` 已实现真实 ELF64 arm64 头校验（注入二进制随包自检）；二者保持叶子模块定位。`:native:pty`（v0.3.6 起）**已实现完整 forkpty 会话链**（8 个 JNI 方法：available/open/write/read/resize/isAlive/wait/close），v0.3.7 进一步以 `PtySessionController` 封装为 fail-closed 会话编排内核（native 优先 + 进程降级 + 统一句柄 + 幂等 close），v0.3.8 由 app 层 `TerminalCommandExecutor` 接入终端命令执行（`MainViewModel.execTerminalCommand` 不再为模拟响应）。**仍未完成**：真实 proot arm64 二进制随包集成（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机验证，阶段5），以及会话内核到向导 `ProcessRunner` 的统一复用。

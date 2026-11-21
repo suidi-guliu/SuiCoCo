@@ -1,5 +1,15 @@
 # suicoco 版本记录
 
+## v0.3.10 — 编辑器撤销树：core:editor 从占位落地为分支撤销内核 + 终端接线
+
+> 响应 2026-11-22 00:13 巡检日报中历轮延续的 P2「编辑器增强余项（撤销树/多光标等）」。本轮日报 P0「收敛 v0.3.9 CI」与 P1「补齐 RELEASE.md v0.3.9」经在线核对均已闭环（双 job success、条目完整），P2「版本标记约定」维持既有惯例（纯文档/运维小版本不逐个建 tag/release），P3「阶段5 核心」需 NDK 交叉编译 + arm64 真机维持阻塞。故本轮落地唯一可离线、CI 安全、未重复的 P2 增强：**分支撤销树**。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/UndoTree.kt`（纯 Kotlin 标准库，可独立编译单测）**：把此前的空壳 `core:editor` 模块落地为真实撤销内核。① **分支树语义**（对标 VSCode 撤销树）：撤销到历史节点后继续编辑会形成新分支，旧分支完整保留，`history()` 返回全部快照供 UI 绘制树，`jumpTo(id)` 可跳任意节点；② **线性 undo/redo**：沿最近访问分支回退/前进，分叉处 redo 自动回到上次所在分支；③ **连续输入合并** `recordTyped()`：同一 key、800ms 窗口内的逐字输入合并为单一撤销步骤；④ **容量上限**：默认 500 节点，超出后优先裁剪最老的非当前路径叶子，纯线性链则提升最老祖先为新根，避免内存无限增长；⑤ **失败安全**：所有公开方法对非法 id/空值返回 null/false/-1，绝不抛异常。零 Android/Compose/三方依赖，core 不依赖 feature 的架构约束不变。
+- **接入 `app/src/main/java/com/suicoco/viewmodel/MainViewModel.kt`**：每个标签页按 path 维护一棵独立撤销树；`openFile()` 以初始内容建根（幂等，重开不重建）、`closeTab()` 清理、`updateContent()` 记录快照并刷新状态；新增 `undo()`/`redo()` 回填内容并同步补全；新增 `undoState`（canUndo/canRedo）StateFlow 驱动 UI 按钮启用态。
+- **接入 `app/src/main/java/com/suicoco/ui/editor/EditorArea.kt`**：新增撤销/重做工具按钮（随 `undoState` 置灰）与键盘快捷键（`Ctrl+Z` 撤销 / `Ctrl+Shift+Z` 或 `Ctrl+Y` 重做）；新增 `ToolbarButton` 组件（disabled 不响应点击）。
+- **验证**：`UndoTree` 经 kotlinc 2.2.20 独立编译 + **53 项单测全通过**（线性撤销重做/分支保留/分叉 redo/任意跳转/幂等/连续输入合并/容量裁剪/clear/边界与失败安全/快照结构）；模拟 MainViewModel 包装流程（app 层调用同构）**15 项全通过**（逐字合并/撤销禁用态/分支/多标签隔离/关闭清理）；单测中发现并修复两处真实缺陷（`recordTyped` 合并状态被 `record` 重置、纯线性链容量裁剪失效）。`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。完整 Compose/APK 编译以 GitHub Actions 为准。
+- **未闭环（仍阻塞）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、终端向导复用会话内核与真机端到端验收、多光标/LSP/DAP 等其余编辑器增强维持阻塞/待后续。
+
 ## v0.3.9 — 构建脚本现代化：jvmTarget 从废弃 kotlinOptions 迁移到 compilerOptions DSL
 
 > 响应 2026-11-21 17:59 巡检日报 P2「各模块 build.gradle.kts 的 jvmTarget 迁至 compilerOptions DSL」。KGP 2.2.20 / AGP 8.13.0 下 `android { kotlinOptions { jvmTarget = "21" } }` 已废弃，本轮统一迁移到官方推荐的 `kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_21) } }`。语义等价、零功能变更，保持三条不变量（无 host root / 官方源 / 仅 arm64）。

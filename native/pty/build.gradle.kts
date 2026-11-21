@@ -13,6 +13,11 @@ android {
         cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.31.6" }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_21; targetCompatibility = JavaVersion.VERSION_21 }
-    kotlinOptions { jvmTarget = "21" }
 }
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+    }
+}
+
 dependencies { implementation(libs.androidx.core.ktx) }

@@ -89,8 +89,8 @@ class TerminalCommandExecutor(
         cols: Int = 80,
         rows: Int = 24,
         maxWaitMs: Long = 30_000L,
-        onLine: (String) -> Unit = {},
-        shouldContinue: () -> Boolean = { true }
+        shouldContinue: () -> Boolean = { true },
+        onLine: (String) -> Unit = {}
     ): ExecResult {
         if (!isAllowed(argv)) return ExecResult(-1, emptyList(), false, rejected = true)
         val opened = sessions.open(cols, rows, argv)

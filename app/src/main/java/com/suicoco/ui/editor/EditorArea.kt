@@ -16,6 +16,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -39,6 +46,17 @@ fun EditorArea(vm: MainViewModel) {
             tabs.forEach { tab ->
                 TabItem(tab, tab.path == activePath, vm)
             }
+        }
+        // 编辑工具栏：撤销 / 重做（状态由撤销树驱动；Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 同效）
+        val undoState by vm.undoState.collectAsState()
+        Row(
+            modifier = Modifier.fillMaxWidth().height(28.dp)
+                .background(VscodeTheme.TabInactiveBg).padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ToolbarButton("↶ 撤销", undoState.first) { vm.undo() }
+            Spacer(Modifier.width(12.dp))
+            ToolbarButton("↷ 重做", undoState.second) { vm.redo() }
         }
         // 面包屑
         Row(
@@ -98,7 +116,15 @@ private fun CodeEditor(tab: EditorTab, vm: MainViewModel) {
     BasicTextField(
         value = tab.content,
         onValueChange = { vm.updateContent(tab.path, it) },
-        modifier = Modifier.fillMaxSize().padding(start = 16.dp, top = 10.dp),
+        modifier = Modifier.fillMaxSize().padding(start = 16.dp, top = 10.dp)
+            .onKeyEvent { e ->
+                if (e.type != KeyEventType.KeyDown || !e.isCtrlPressed) return@onKeyEvent false
+                when (e.key) {
+                    Key.Z -> { if (e.isShiftPressed) vm.redo() else vm.undo(); true }
+                    Key.Y -> { vm.redo(); true }
+                    else -> false
+                }
+            },
         textStyle = TextStyle(
             color = VscodeTheme.Fg,
             fontSize = VscodeTheme.FONT_SIZE.sp,
@@ -185,4 +211,16 @@ private fun ActionBtn(text: String, onClick: () -> Unit) {
         modifier = Modifier.background(VscodeTheme.Accent)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp))
+}
+
+/** 工具栏按钮：enabled=false 时置灰且不响应点击。 */
+@Composable
+private fun ToolbarButton(text: String, enabled: Boolean, onClick: () -> Unit) {
+    Text(
+        text,
+        color = if (enabled) VscodeTheme.FgMuted else VscodeTheme.FgDim.copy(alpha = 0.4f),
+        fontSize = 12.sp,
+        modifier = Modifier.clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 3.dp)
+    )
 }

@@ -1,5 +1,15 @@
 # suicoco 版本记录
 
+## v0.3.8 — PTY 会话内核接入终端执行层：模拟响应升级为真实命令执行
+
+> 响应 2026-11-21 12:00 巡检日报 P0「PTY 会话链接线到进程执行层」+ P1「同步设计文档滞后状态」。v0.3.7 已落地会话编排内核但终端 UI 仍是模拟响应，本轮把内核接到命令执行层，属阶段5 可离线落地部分。保持三条不变量（无 host root / 官方源 / 仅 arm64）。接线位于 app 层，native 叶子模块定位与 core 不依赖 feature 的约束均不变。
+
+- **新增 `app/src/main/java/com/suicoco/terminal/TerminalCommandExecutor.kt`（app 层适配器，纯 Kotlin/JDK 标准库）**：把 `PtySessionController` 会话内核包装为终端可用的命令执行器。① **安全分词** `tokenize()`：shell-like 单/双引号 + 反斜杠转义，不展开变量、不做 glob、不解释元字符，不经 shell、不拼接命令字符串，引号未闭合/含 NUL/空输入一律 fail-closed；② **no-root 前置校验** `isAllowed()`：与 `ProotManager.assertNoHostRoot` 同语义，拒绝裸 su/sudo 与 shizuku/--host-root/libsu 等危险标记；③ **真实执行** `execute()`：命令字符串→argv 交给会话内核，native 可用走 forkpty、不可用自动降级直接进程，非阻塞轮询读 + `\n` 分行逐行回调，超时上限 + `shouldContinue` 协程取消钩子，finally 幂等 close 回收会话。
+- **改造 `app/src/main/java/com/suicoco/viewmodel/MainViewModel.kt`**：`execTerminalCommand` 从模拟响应（help/pwd/ls 硬编码）改为经执行器真实执行；内置 help/clear 仍本地处理，其余命令分词后走会话内核，IO 线程执行、逐行回传真实输出，并显示当前会话模式（native PTY / 进程降级）；`onCleared()` 统一 `closeAll()` 释放会话资源。
+- **`docs/ARCHITECTURE.md` §7**：修正 native/pty 滞后描述——从「仅 /dev/ptmx 探测、完整 forkpty 未完成」更新为「v0.3.6 完整 forkpty 会话链 + v0.3.7 会话编排内核 + v0.3.8 终端接线」，剩余 proot 二进制随包与向导复用维持阻塞标注。
+- **验证**：`TerminalCommandExecutor` + `PtySessionController` + `PtyBridge` 经 kotlinc 2.2.20 独立编译并运行单测全通过（分词/引号转义/no-root 拒绝/native 委托/降级执行/逐行回传/幂等 close/超时与取消）；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过；全部 `scripts/*.sh` `bash -n` 通过。完整 Compose/APK 编译以 GitHub Actions 为准。
+- **未闭环（仍阻塞）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）；会话内核到向导 `ProcessRunner` 的统一复用与真机端到端验收维持阻塞。
+
 ## v0.3.7 — native/pty 会话编排内核：裸 JNI 桥升级为 fail-closed 会话 API + 进程降级
 
 > 响应 2026-11-21 05:59 巡检日报 P0「native 完整实体化」历轮延续项。v0.3.6 已落地 forkpty 的 8 个 JNI 方法，但 PtyBridge 仍是「裸桥」——native 库加载失败时 `safeOpen` 直接返回 -1、上层无法真正执行命令，且无会话生命周期管理。本轮补齐会话编排内核，属阶段5 的可离线落地部分。保持三条不变量（无 host root / 官方源 / 仅 arm64）。真实 proot 二进制随包仍待 NDK 交叉编译 + 真机验证。

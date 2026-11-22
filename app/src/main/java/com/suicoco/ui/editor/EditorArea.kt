@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -30,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.suicoco.core.design.VscodeTheme
 import com.suicoco.core.editor.MinimapModel
+import com.suicoco.core.editor.MultiCursorModel
 import com.suicoco.data.EditorTab
 import com.suicoco.viewmodel.MainViewModel
 
@@ -37,6 +40,12 @@ import com.suicoco.viewmodel.MainViewModel
 fun EditorArea(vm: MainViewModel) {
     val tabs by vm.tabs.collectAsState()
     val activePath by vm.activeTabPath.collectAsState()
+
+    // 多光标模式：内核实例与开关状态在重组间保持。内核的批量编辑经 vm.updateContent 回写，
+    // 因此与撤销树、补全、minimap 既有行为天然同步；纯 Kotlin 内核可独立单测。
+    val cursorModel = remember { MultiCursorModel() }
+    var multiMode by remember { mutableStateOf(false) }
+    var cursorTick by remember { mutableStateOf(0) } // 光标数变化触发重组
 
     Column(modifier = Modifier.fillMaxSize().background(VscodeTheme.EditorBg)) {
         // 标签栏
@@ -59,6 +68,26 @@ fun EditorArea(vm: MainViewModel) {
             ToolbarButton("↶ 撤销", undoState.first) { vm.undo() }
             Spacer(Modifier.width(12.dp))
             ToolbarButton("↷ 重做", undoState.second) { vm.redo() }
+            Spacer(Modifier.width(16.dp))
+            ToolbarButton(
+                text = if (multiMode) "⋮ 多光标 ON (${cursorModel.cursorCount()})" else "⋮ 多光标",
+                enabled = true
+            ) {
+                multiMode = !multiMode
+                cursorModel.clearCursors()
+                cursorTick++
+            }
+        }
+        // 多光标操作条：仅开启时显示，复用内核的列编辑放置与批量编辑能力。
+        if (multiMode) {
+            MultiCursorBar(
+                vm = vm,
+                path = activePath.orEmpty(),
+                model = cursorModel,
+                content = tabs.find { it.path == activePath }?.content.orEmpty(),
+                onTick = { cursorTick++ },
+                onExit = { multiMode = false }
+            )
         }
         // 面包屑
         Row(
@@ -252,6 +281,69 @@ private fun ActionBtn(text: String, onClick: () -> Unit) {
         modifier = Modifier.background(VscodeTheme.Accent)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp))
+}
+
+/**
+ * 多光标操作条：列编辑放置 + 批量编辑，全部交由纯 Kotlin 内核 [MultiCursorModel] 完成，
+ * UI 只做按钮映射与回写。BasicTextField 原生不支持多光标文本域，故采用「缓冲输入 +
+ * 批量应用」交互：先在同列放置若干光标，再把缓冲文本一次性插入/退格/删除到所有光标处。
+ * 完整的多光标文本域（逐光标选区渲染）属后续阶段，见 ARCHITECTURE §7。
+ */
+@Composable
+private fun MultiCursorBar(
+    vm: MainViewModel,
+    path: String,
+    model: MultiCursorModel,
+    content: String,
+    onTick: () -> Unit,
+    onExit: () -> Unit
+) {
+    var buffer by remember { mutableStateOf("    ") }
+    val applyEdit: (MultiCursorModel.EditResult) -> Unit = { result ->
+        if (path.isNotEmpty() && result.text != content) vm.updateContent(path, result.text)
+        onTick()
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .background(VscodeTheme.WidgetBg).padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("⋮ 多光标(${model.cursorCount()})", color = VscodeTheme.Purple, fontSize = 12.sp)
+            Spacer(Modifier.width(10.dp))
+            ToolbarButton("＋下行同列") {
+                val off = if (model.cursorCount() == 0) 0 else model.primaryCursor()
+                val next = model.columnDown(content, off)
+                if (model.addCursor(next, content.length)) onTick()
+            }
+            Spacer(Modifier.width(8.dp))
+            ToolbarButton("＋上行同列") {
+                val off = if (model.cursorCount() == 0) 0 else model.primaryCursor()
+                val prev = model.columnUp(content, off)
+                if (model.addCursor(prev, content.length)) onTick()
+            }
+            Spacer(Modifier.width(8.dp))
+            ToolbarButton("清空") { model.clearCursors(); onTick() }
+            Spacer(Modifier.width(8.dp))
+            ToolbarButton("退出") { onExit() }
+        }
+        Spacer(Modifier.height(3.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BasicTextField(
+                value = buffer,
+                onValueChange = { buffer = it },
+                modifier = Modifier.weight(1f).background(VscodeTheme.InputBg).padding(6.dp),
+                singleLine = true,
+                textStyle = TextStyle(color = VscodeTheme.Fg, fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace)
+            )
+            Spacer(Modifier.width(8.dp))
+            ToolbarButton("插入") { applyEdit(model.insertAtAll(content, buffer)) }
+            Spacer(Modifier.width(8.dp))
+            ToolbarButton("退格") { applyEdit(model.deleteBeforeAll(content, 1)) }
+            Spacer(Modifier.width(8.dp))
+            ToolbarButton("删除") { applyEdit(model.deleteAfterAll(content, 1)) }
+        }
+    }
 }
 
 /** 工具栏按钮：enabled=false 时置灰且不响应点击。 */

@@ -1,5 +1,20 @@
 # suicoco 版本记录
 
+> **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
+
+## v0.3.11 — PTY 会话内核统一：向导与终端复用同一套 fail-closed 会话 + 版本惯例说明
+
+> 响应 2026-11-22 05:59 巡检日报 P0（PTY 会话内核统一复用到安装向导，消除两套执行实现）+ P1（版本追溯断层收口）。在线核对：HEAD `b0f6154d`，RELEASE 记至 v0.3.10，双 job success（run 44955161878/44955161774）；P2（minimap）本轮按优先级让位 P0/P1，留待后续。保持三条不变量（无 host root / 官方源 / 仅 arm64）。本轮把向导从独立的 ProcessBuilder 执行路径收敛到与终端共享的 PTY 会话内核，core/feature 不依赖 native 叶子模块的架构约束不变。
+
+- **新增 `core/term/src/main/java/com/suicoco/core/term/CommandExecutor.kt`（纯 Kotlin 契约）**：定义统一的命令执行接口 `CommandExecutor`（`run` / `cancel` / `cancelAll`）与值对象 `CommandResult(exitCode)`，作为"一套执行、两处复用"的抽象基点。core:term 仅持有契约，不依赖 native；消除了向导（`ProcessRunner`/ProcessBuilder）与终端（`PtySessionController`）各一套、互不复用的历史分裂。
+- **`ProcessRunner` 实现 `CommandExecutor`**：保留 ProcessBuilder 路径作为默认纯 JVM 后端，`Result` 统一为 `CommandResult`；feature/onboarding 零 native 依赖、可独立单测的属性不变。
+- **新增 `app/src/main/java/com/suicoco/terminal/PtyCommandExecutor.kt`（app 层适配器）**：把 `PtySessionController` 会话内核包装为 `CommandExecutor`，native 优先 + 进程降级 + fail-closed + 幂等 close 全继承；按 tag 维护句柄映射支持向导取消；逐行读取按 `0x0A` 切行并做 UTF-8 跨块保护、读取总量封顶（32 MiB）、30 分钟保护性上限。env 参数因会话内核已继承进程环境而忽略（SUICOCO_PROOT 来自 System.getenv），避免 shell 拼接注入面。
+- **接线 `MainViewModel` + `Overlays.kt`**：创建**共享** `PtySessionController` 实例，同时注入 `TerminalCommandExecutor` 与 `PtyCommandExecutor`，终端与向导共用同一会话池；`onCleared` 统一回收。`InstallerController` 改为接受可注入 `CommandExecutor`（默认仍 ProcessRunner），`Overlays` 注入 `vm.installerExecutor`。
+- **P1 版本惯例收口**：RELEASE.md 顶部补一句版本标记惯例说明（仅对外里程碑建 tag/release，功能小版本随 main 提交），止住历轮重复的"版本追溯断层"提示；不补建历史 tag，维持既有事实。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 更新向导执行路径为 `CommandExecutor` 契约注入 + 会话统一；修正"无撤销树"为 v0.3.10 已落地。
+- **验证**：`CommandExecutor` / `ProcessRunner` / `PtySessionController` / `PtyCommandExecutor` / `TerminalCommandExecutor` 经 kotlinc 2.2.20 独立编译 + 单测（详见回复），`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过，全部 `scripts/*.sh` `bash -n` 通过。完整 Compose/APK 编译以 GitHub Actions 为准。
+- **未闭环（仍阻塞）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、minimap/多光标/LSP/DAP 等编辑器增强维持阻塞/待后续。
+
 ## v0.3.10 — 编辑器撤销树：core:editor 从占位落地为分支撤销内核 + 终端接线
 
 > 响应 2026-11-22 00:13 巡检日报中历轮延续的 P2「编辑器增强余项（撤销树/多光标等）」。本轮日报 P0「收敛 v0.3.9 CI」与 P1「补齐 RELEASE.md v0.3.9」经在线核对均已闭环（双 job success、条目完整），P2「版本标记约定」维持既有惯例（纯文档/运维小版本不逐个建 tag/release），P3「阶段5 核心」需 NDK 交叉编译 + arm64 真机维持阻塞。故本轮落地唯一可离线、CI 安全、未重复的 P2 增强：**分支撤销树**。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

@@ -348,7 +348,7 @@ private fun MultiCursorBar(
 
 /** 工具栏按钮：enabled=false 时置灰且不响应点击。 */
 @Composable
-private fun ToolbarButton(text: String, enabled: Boolean, onClick: () -> Unit) {
+private fun ToolbarButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
     Text(
         text,
         color = if (enabled) VscodeTheme.FgMuted else VscodeTheme.FgDim.copy(alpha = 0.4f),

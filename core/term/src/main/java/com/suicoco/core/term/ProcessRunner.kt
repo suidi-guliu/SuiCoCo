@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
  * - 硬性不变量：本类只执行调用方传入的 argv，绝不自行提权；
  *   no-root 约束由 [ProotManager.assertNoHostRoot] 在调用前校验。
  */
-class ProcessRunner {
+class ProcessRunner : CommandExecutor {
     private val active = ConcurrentHashMap<String, Process>()
 
     /**
@@ -29,12 +29,12 @@ class ProcessRunner {
      * @param env 注入的环境变量（如 SUICOCO_PROOT）
      * @param onLine 每读到一行输出回调一次（已去除换行符）
      */
-    suspend fun run(
+    override suspend fun run(
         argv: List<String>,
-        tag: String = "default",
-        env: Map<String, String> = emptyMap(),
-        onLine: (String) -> Unit = {}
-    ): Result = withContext(Dispatchers.IO) {
+        tag: String,
+        env: Map<String, String>,
+        onLine: (String) -> Unit
+    ): CommandResult = withContext(Dispatchers.IO) {
         require(argv.isNotEmpty()) { "空命令，拒绝执行" }
         val builder = ProcessBuilder(argv).redirectErrorStream(true)
         env.forEach { (k, v) -> builder.environment()[k] = v }
@@ -48,25 +48,21 @@ class ProcessRunner {
                 }
             }
             val code = process.waitFor()
-            Result(exitCode = code)
+            CommandResult(exitCode = code)
         } finally {
             active.remove(tag)
         }
     }
 
     /** 取消指定会话（ destroy 子进程；已结束则无副作用）。 */
-    fun cancel(tag: String) {
+    override fun cancel(tag: String) {
         active[tag]?.destroy()
         active.remove(tag)
     }
 
     /** 取消全部在跑的会话。 */
-    fun cancelAll() {
+    override fun cancelAll() {
         active.values.forEach { it.destroy() }
         active.clear()
-    }
-
-    data class Result(val exitCode: Int) {
-        val success: Boolean get() = exitCode == 0
     }
 }

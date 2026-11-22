@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.14 — minimap 点击跳转：core:editor 滚动锚点内核 + 视口高亮接线
+
+> 响应 2026-11-22 23:59 巡检日报 P1（minimap 点击跳转滚动接线）。在线核对：HEAD `367fc90c`，RELEASE 记至 v0.3.13（多光标已由上一轮落地，日报 P2 多光标已完成故跳过），双 job success。P0（真实 arm64 `libproot.so` 随包，需 NDK 交叉编译 + arm64 真机）维持阻塞；日报三条优先级中仅 P1 可离线、CI 安全地落地，故本轮把已就绪的 `MinimapModel.lineAt` 内核接到编辑器滚动。沿用 `UndoTree`/`MinimapModel`/`MultiCursorModel` 的纯 Kotlin 内核 + 独立单测范式。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **增强 `core/editor/src/main/java/com/suicoco/core/editor/MinimapModel.kt`（纯 Kotlin 标准库）**：新增 `scrollAnchorLine(layout, targetLine, visibleLines)`——把「点击映射出的源行号」换算为编辑器应滚动到的首个可见行，使目标行尽量居中（上移半个视口）并夹紧到 `[0, sourceLineCount - visibleLines]`；失败安全（空布局返回 0、负数/超界夹紧、纯函数幂等）。`lineAt`（截断按比例还原源行号）与 `viewportRect` 既有能力复用，未改动既有行为。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：`CodeEditor` 的文本区改由外层 `Box.verticalScroll(scrollState)` 承担滚动（`BasicTextField` 用 `fillMaxWidth` 按内容高度铺开，避免其内部滚动使 `scrollState.maxValue` 为 0），滚动状态提升到编辑器级；`MinimapRail` 每行横杠点击经 `lineAt → scrollAnchorLine → ScrollState.animateScrollTo` 平滑滚动到目标行，并用 `viewportRect` 叠加半透明视口高亮框（当前可见行区间）；可见行数由代码区实测高度/行高估算。仅用 `clickable`/`Box` 等稳定 API，不引入实验性手势接口，键盘输入/撤销重做/补全/多光标/minimap 既有行为不变。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 minimap 条目更新为「点击跳转 + 视口高亮已接线」，滚动锚点内核归属 `:core:editor`。
+- **验证**：`MinimapModel` 经 kotlinc 2.2.20 独立编译 + **32 项单测全通过**（新增 scrollAnchorLine 居中/夹紧/边界/视口大于文档/幂等等用例，并回归 lineAt 截断缩放、viewportRect、build 容量截断与 CRLF 归一）；`EditorArea.kt` 括号平衡与符号引用静态校验通过（花括号 88/88、圆括号 284/284）。完整 Compose/APK 编译以 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、minimap 拖拽连续滑动（本轮先落地点击跳转）、BasicTextField 逐光标选区渲染的多光标文本域、LSP/DAP 维持阻塞/待后续。
+
 ## v0.3.13 — 编辑器多光标：core:editor 批量编辑内核 + 列编辑操作条接线
 
 > 响应 2026-11-22 17:59 巡检日报 P1（编辑器增强余项「再排多光标」）+ P2（RELEASE.md 构建 run 引用口径）。在线核对：HEAD `276bd02b`，RELEASE 记至 v0.3.12（minimap 已由上一轮落地），双 job success。P0（真实 arm64 `libproot.so` 随包，需 NDK 交叉编译 + arm64 真机）与 P3（阶段4/5/6 todo 因成员仅所有者一人无法指派）经核对维持阻塞/现状，不重复。故本轮落地日报 P1 的下一项「多光标」，沿用 `UndoTree`/`MinimapModel` 的纯 Kotlin 内核 + 独立单测范式，并补注 P2 的 run 引用口径。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

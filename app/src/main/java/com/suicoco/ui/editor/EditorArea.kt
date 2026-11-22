@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -28,6 +29,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.suicoco.core.design.VscodeTheme
+import com.suicoco.core.editor.MinimapModel
 import com.suicoco.data.EditorTab
 import com.suicoco.viewmodel.MainViewModel
 
@@ -113,45 +115,84 @@ private fun TabItem(tab: EditorTab, active: Boolean, vm: MainViewModel) {
 @Composable
 private fun CodeEditor(tab: EditorTab, vm: MainViewModel) {
     val completions by vm.completions.collectAsState()
-    BasicTextField(
-        value = tab.content,
-        onValueChange = { vm.updateContent(tab.path, it) },
-        modifier = Modifier.fillMaxSize().padding(start = 16.dp, top = 10.dp)
-            .onKeyEvent { e ->
-                if (e.type != KeyEventType.KeyDown || !e.isCtrlPressed) return@onKeyEvent false
-                when (e.key) {
-                    Key.Z -> { if (e.isShiftPressed) vm.redo() else vm.undo(); true }
-                    Key.Y -> { vm.redo(); true }
-                    else -> false
-                }
-            },
-        textStyle = TextStyle(
-            color = VscodeTheme.Fg,
-            fontSize = VscodeTheme.FONT_SIZE.sp,
-            lineHeight = VscodeTheme.LINE_HEIGHT.sp,
-            fontFamily = FontFamily.Monospace
-        ),
-        decorationBox = { inner ->
-            Box {
-                // 行号栏（静态演示 1..N）
-                val lineCount = tab.content.count { it == '\n' } + 1
-                Column {
-                    for (i in 1..lineCount.coerceAtMost(60)) {
-                        Text(
-                            i.toString().padStart(2),
-                            color = VscodeTheme.FgDim,
-                            fontSize = VscodeTheme.FONT_SIZE.sp,
-                            fontFamily = FontFamily.Monospace,
-                            lineHeight = VscodeTheme.LINE_HEIGHT.sp
-                        )
+    Row(modifier = Modifier.fillMaxSize()) {
+        BasicTextField(
+            value = tab.content,
+            onValueChange = { vm.updateContent(tab.path, it) },
+            modifier = Modifier.fillMaxSize().weight(1f).padding(start = 16.dp, top = 10.dp)
+                .onKeyEvent { e ->
+                    if (e.type != KeyEventType.KeyDown || !e.isCtrlPressed) return@onKeyEvent false
+                    when (e.key) {
+                        Key.Z -> { if (e.isShiftPressed) vm.redo() else vm.undo(); true }
+                        Key.Y -> { vm.redo(); true }
+                        else -> false
                     }
+                },
+            textStyle = TextStyle(
+                color = VscodeTheme.Fg,
+                fontSize = VscodeTheme.FONT_SIZE.sp,
+                lineHeight = VscodeTheme.LINE_HEIGHT.sp,
+                fontFamily = FontFamily.Monospace
+            ),
+            decorationBox = { inner ->
+                Box {
+                    // 行号栏（静态演示 1..N）
+                    val lineCount = tab.content.count { it == '\n' } + 1
+                    Column {
+                        for (i in 1..lineCount.coerceAtMost(60)) {
+                            Text(
+                                i.toString().padStart(2),
+                                color = VscodeTheme.FgDim,
+                                fontSize = VscodeTheme.FONT_SIZE.sp,
+                                fontFamily = FontFamily.Monospace,
+                                lineHeight = VscodeTheme.LINE_HEIGHT.sp
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(40.dp))
+                    inner()
                 }
-                Spacer(Modifier.width(40.dp))
-                inner()
+            }
+        )
+        // 右侧代码缩略图（minimap）：密度条按内核分级着色，点击按行号定位。
+        MinimapRail(content = tab.content, onJump = { /* 视口滚动接线留待后续；内核 lineAt 已就绪 */ })
+    }
+    // 补全弹层触发提示（真实渲染由 CompletionPopup 负责）
+}
+
+/**
+ * 代码缩略图竖条：把每行渲染为一条极细横杠，密度越高越亮、注释偏黄、空行跳过。
+ * 计算全部交由纯 Kotlin 内核 [MinimapModel]，UI 只做映射，无状态、可幂等重组。
+ */
+@Composable
+private fun MinimapRail(content: String, onJump: (Int) -> Unit) {
+    val model = remember { MinimapModel() }
+    val layout = remember(content) { model.build(content) }
+    Column(
+        modifier = Modifier.fillMaxHeight().width(48.dp)
+            .background(VscodeTheme.EditorBg)
+            .padding(top = 10.dp, end = 2.dp)
+    ) {
+        layout.lines.forEach { line ->
+            if (line.density > 0) {
+                val barColor = when (line.kind) {
+                    MinimapModel.Kind.COMMENT -> VscodeTheme.Yellow
+                    MinimapModel.Kind.CODE -> VscodeTheme.FgMuted
+                    MinimapModel.Kind.BLANK -> VscodeTheme.EditorBg
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .padding(start = (line.indent.coerceAtMost(12) * 1).dp)
+                        .background(barColor.copy(alpha = 0.25f + line.density * 0.18f))
+                        .clickable { onJump(line.index) }
+                )
+            } else {
+                Spacer(Modifier.fillMaxWidth().height(2.dp))
             }
         }
-    )
-    // 补全弹层触发提示（真实渲染由 CompletionPopup 负责）
+    }
 }
 
 @Composable

@@ -65,7 +65,8 @@ fun InstallWizard(vm: MainViewModel) {
     if (!visible) return
     val context = LocalContext.current
     // 向导生命周期内复用同一控制器，保证取消/状态一致
-    val controller = remember { InstallerController(context) }
+    // v0.3.11：注入 vm 共享的 PTY 会话执行器，向导与终端复用同一套 fail-closed 会话
+    val controller = remember { InstallerController(context, vm.installerExecutor) }
     val state by controller.state.collectAsState()
 
     // 安装完成后，把结果同步回主状态机（环境守卫放行 + 各步骤标记 DONE）

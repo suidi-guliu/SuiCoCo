@@ -103,6 +103,21 @@ class MinimapModel(private val config: Config = Config()) {
         }
     }
 
+    /**
+     * 滚动锚点：把「点击映射出的源行号」换算为编辑器应滚动到的首个可见行（0-based）。
+     * 目标是让 [targetLine] 尽量落在视口中央（上移半个视口），再夹紧到
+     * `[0, sourceLineCount - visibleLines]`。用于 minimap 点击/拖拽跳转接线。
+     * 失败安全：空布局返回 0；[targetLine] / [visibleLines] 非法时夹紧；纯函数幂等。
+     */
+    fun scrollAnchorLine(layout: MinimapLayout, targetLine: Int, visibleLines: Int): Int {
+        val total = layout.sourceLineCount
+        if (total <= 0) return 0
+        val visible = min(max(1, visibleLines), total)
+        val t = if (targetLine < 0) 0 else min(targetLine, total - 1)
+        val anchor = t - visible / 2
+        return anchor.coerceIn(0, total - visible)
+    }
+
     /** 每次滚动的像素行距换算：行高像素 → 缩略行单位。非法 rowPx 回退默认。 */
     fun pixelsToLines(pixels: Float): Float {
         val px = if (config.rowPx > 0f && !config.rowPx.isNaN()) config.rowPx else DEFAULT_ROW_PX

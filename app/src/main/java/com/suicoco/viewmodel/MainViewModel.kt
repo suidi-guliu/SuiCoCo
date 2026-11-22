@@ -5,6 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.suicoco.data.*
 import com.suicoco.core.syntax.CompletionEngine
 import com.suicoco.core.editor.UndoTree
+import com.suicoco.core.term.CommandExecutor
+import com.suicoco.nativelib.pty.PtySessionController
+import com.suicoco.terminal.PtyCommandExecutor
 import com.suicoco.terminal.TerminalCommandExecutor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -21,8 +24,18 @@ import kotlinx.coroutines.flow.SharingStarted
  */
 class MainViewModel : ViewModel() {
 
+    /**
+     * 共享的 PTY 会话内核 —— 终端与安装向导复用同一实例（v0.3.11）。
+     * 两个执行适配器注入同一会话池，统一 native 优先 + 进程降级 + fail-closed 语义，
+     * onCleared 时一次性 closeAll 回收全部会话。
+     */
+    private val sharedSessions = PtySessionController()
+
     /** 终端命令执行器（PTY 会话内核的 app 层适配）。native 优先、不可用时自动降级进程。 */
-    private val terminalExecutor = TerminalCommandExecutor()
+    private val terminalExecutor = TerminalCommandExecutor(sharedSessions)
+
+    /** 安装向导命令执行器：与终端共享同一会话内核的 CommandExecutor 适配。 */
+    val installerExecutor: CommandExecutor = PtyCommandExecutor(sharedSessions)
 
     // ---- 活动栏 ----
     enum class ActivityView { EXPLORER, SEARCH, SCM, DEBUG, EXTENSIONS, SETTINGS }

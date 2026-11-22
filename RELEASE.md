@@ -2,6 +2,17 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.13 — 编辑器多光标：core:editor 批量编辑内核 + 列编辑操作条接线
+
+> 响应 2026-11-22 17:59 巡检日报 P1（编辑器增强余项「再排多光标」）+ P2（RELEASE.md 构建 run 引用口径）。在线核对：HEAD `276bd02b`，RELEASE 记至 v0.3.12（minimap 已由上一轮落地），双 job success。P0（真实 arm64 `libproot.so` 随包，需 NDK 交叉编译 + arm64 真机）与 P3（阶段4/5/6 todo 因成员仅所有者一人无法指派）经核对维持阻塞/现状，不重复。故本轮落地日报 P1 的下一项「多光标」，沿用 `UndoTree`/`MinimapModel` 的纯 Kotlin 内核 + 独立单测范式，并补注 P2 的 run 引用口径。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/MultiCursorModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把多光标编辑落地为真实内核。① 维护一组升序、去重、夹紧到 `[0, textLength]` 的光标偏移，容量上限默认 64（非法阈值回退到 1），避免长文档光标爆炸；② `insertAtAll` / `deleteBeforeAll`（退格）/ `deleteAfterAll`（删除）在**所有**光标处同时施加编辑，采用「一次遍历构建结果」算法避免逐光标修改导致的偏移漂移与重叠删除，并把结果光标写回内核支持连续输入；③ `columnDown`/`columnUp` 提供同列上/下放置光标（短行夹紧、不越行）；④ `reconcile` 供外部文本变化后夹紧去重；⑤ 全部公开方法失败安全（非法偏移夹紧、非法数量幂等、空输入原样返回），确定性无隐藏状态副作用。零 Android/Compose/三方依赖，core 不依赖 feature 的约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：工具栏新增「⋮ 多光标」开关（显示当前光标数），开启后展示操作条：`＋下行同列`/`＋上行同列` 放置光标，`插入`/`退格`/`删除` 把缓冲文本或删除操作批量应用到所有光标，`清空`/`退出` 收尾。批量结果经 `MainViewModel.updateContent` 回写，因此与撤销树快照、补全刷新、minimap 重算天然同步。补全弹层、撤销/重做、行号栏、minimap 等既有行为不变。
+- **RELEASE.md P2 补注**：v0.3.11 条目所引 run `44955161878/44955161774` 系 v0.3.10 撤销树提交的构建记录，补注「功能小版本不逐个绑定单一 run、以最近一次双 job success 为准」，消除追溯歧义（见 v0.3.11 条目）。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 更新为多光标内核已落地 + 操作条接线说明，标注 BasicTextField 多光标文本域（逐光标选区渲染）仍属后续阶段。
+- **验证**：`MultiCursorModel` 经 kotlinc 2.2.20 独立编译 + **48 项单测全通过**（单光标/夹紧/去重/容量/主光标/批量插入偏移稳定/开头与末尾光标/退格与删除语义/重叠删除/非法数量幂等/列编辑上下移动含短行夹紧/reconcile/移除保底/确定性幂等/连续插入推进）；单测中发现并修复两处真实缺陷（`deleteAfterAll` 光标左移误算、`columnDown` 短行越界）。改动文件括号平衡与符号引用静态校验通过。完整 Compose/APK 编译以 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、minimap 点击跳转滚动接线（`lineAt` 内核已就绪）、BasicTextField 逐光标选区渲染的多光标文本域（当前以「缓冲 + 批量应用」交互落地）、LSP/DAP 维持阻塞/待后续。
+
 ## v0.3.12 — 编辑器 minimap：core:editor 代码缩略图内核 + 右侧密度条接线
 
 > 响应 2026-11-22 12:00 巡检日报 P3「编辑器增强余项（minimap 排期）」。在线核对：HEAD `9f372220`，RELEASE 记至 v0.3.11，双 job success；P0（补 tag v0.3.10）已由 v0.3.11 的「仅里程碑建标」惯例书面收口、P1（架构文档第 93 行）在线已是目标文案、P2（arm64 proot 随包）需 NDK+真机维持阻塞。故本轮落地 12:20 轮次明确「留待后续」的 minimap，沿用 `UndoTree` 的纯 Kotlin 内核 + 独立单测范式。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
@@ -14,6 +25,8 @@
 ## v0.3.11 — PTY 会话内核统一：向导与终端复用同一套 fail-closed 会话 + 版本惯例说明
 
 > 响应 2026-11-22 05:59 巡检日报 P0（PTY 会话内核统一复用到安装向导，消除两套执行实现）+ P1（版本追溯断层收口）。在线核对：HEAD `b0f6154d`，RELEASE 记至 v0.3.10，双 job success（run 44955161878/44955161774）；P2（minimap）本轮按优先级让位 P0/P1，留待后续。保持三条不变量（无 host root / 官方源 / 仅 arm64）。本轮把向导从独立的 ProcessBuilder 执行路径收敛到与终端共享的 PTY 会话内核，core/feature 不依赖 native 叶子模块的架构约束不变。
+>
+> **构建 run 引用口径补注（v0.3.13，回应 2026-11-22 17:59 巡检日报 P2）**：上句所引 run `44955161878/44955161774` 实为 v0.3.10 撤销树提交（`c280469`…`9c1ca6a`）的 Actions 记录，非本 v0.3.11 源码 HEAD 的独立构建号。v0.3.11 及后续功能小版本按「仅里程碑建 tag/release、功能小版本随 main 提交」惯例，不逐个绑定单一 run，统一以 `.github/workflows/build.yml` 最近一次双 job success 为准；本补注用于消除追溯歧义，非功能变更。
 
 - **新增 `core/term/src/main/java/com/suicoco/core/term/CommandExecutor.kt`（纯 Kotlin 契约）**：定义统一的命令执行接口 `CommandExecutor`（`run` / `cancel` / `cancelAll`）与值对象 `CommandResult(exitCode)`，作为"一套执行、两处复用"的抽象基点。core:term 仅持有契约，不依赖 native；消除了向导（`ProcessRunner`/ProcessBuilder）与终端（`PtySessionController`）各一套、互不复用的历史分裂。
 - **`ProcessRunner` 实现 `CommandExecutor`**：保留 ProcessBuilder 路径作为默认纯 JVM 后端，`Result` 统一为 `CommandResult`；feature/onboarding 零 native 依赖、可独立单测的属性不变。

@@ -4,6 +4,7 @@ import android.content.Context
 import com.suicoco.core.distro.DistroProfile
 import com.suicoco.core.distro.ProotManager
 import com.suicoco.core.distro.RootfsManager
+import com.suicoco.core.term.CommandExecutor
 import com.suicoco.core.term.ProcessRunner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,12 +47,18 @@ data class InstallerState(
  * 全程逐行回传日志，硬性不变量：无 host root、官方源、仅 arm64-v8a。
  *
  * 与 Compose 解耦：UI 仅观察 [state] 并调用 [start] / [cancel]，便于单元测试。
+ *
+ * v0.3.11：执行后端从写死的 [ProcessRunner] 改为可注入的 [CommandExecutor] 契约。
+ * 默认仍用 ProcessRunner（零 native 依赖，feature 层可独立单测）；app 层可注入
+ * PtyCommandExecutor，使向导与终端共享同一套 fail-closed 会话（native 优先 + 降级）。
  */
-class InstallerController(context: Context) {
+class InstallerController(
+    context: Context,
+    private val runner: CommandExecutor = ProcessRunner()
+) {
     private val appContext = context.applicationContext
     private val rootfs = RootfsManager(appContext)
     private val proot = ProotManager(appContext)
-    private val runner = ProcessRunner()
     private val gate = Mutex()
 
     private val _state = MutableStateFlow(InstallerState())

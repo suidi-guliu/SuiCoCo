@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.17 — 逐光标多段选区高亮：core:editor 选区拆分内核 + 编辑器选区块接线
+
+> 响应 2026-11-23 18:00 巡检日报 P3（编辑器增强余项「BasicTextField 原生逐光标多段选区高亮」）。在线核对：HEAD `1dd4921`（源码 HEAD `28fa2f9`），RELEASE 记至 v0.3.16，双 job success。日报 P1（minimap 拖拽连续滑动）已由 v0.3.16 完成，跳过；P2（真实 arm64 `libproot.so` 随包，需 NDK 交叉编译 + arm64 真机）与 P4（阶段4/5/6 todo 无 assignee，成员仅所有者一人）经核对维持阻塞/现状，非仓库文件或无 SDK/NDK/真机不可完成，不重复；P3 中 LSP/DAP 工程量巨大，非单轮可闭环。故本轮落地 P3 中可离线、CI 安全、未重复的「多段选区高亮」，沿用纯 Kotlin 内核 + 独立单测范式，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/SelectionHighlightModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把一组选区换算为逐行高亮矩形。① `normalize(text, pairs)` 把 (anchor,active) 偏移对交换/夹紧到 `[0,len]`、丢零宽、升序、合并相邻与重叠区间，避免重复绘制；② `highlightRects` / `highlightOf` 把每个 `[start,end)` 选区拆成逐行 `HighlightRect`（单行一段；跨行=首行 start→行尾 + 中间整行 + 末行行首→end），列按 UTF-16 code unit、tab 加权（默认 4）、CRLF 视为单换行且 offset 停 `\r`/`\n` 之间归本行行尾（与 `CursorLayoutModel` 同口径），像素 `x=startCol*cw`/`width=(endCol-startCol)*cw`/`y=line*lh`，矩形上限 256；③ `tokenRangeOf(text, offset)` 取光标处标识符 token、`occurrencesOf(text, token)` 返回全词匹配的全部出现（供 VSCode「选中所有匹配项」）；④ 全部公开方法失败安全（NaN/负像素回退 0、非法 tab 回退、空输入幂等）、纯函数无隐藏状态，零 Android/Compose/三方依赖，core 不依赖 feature 的约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：`CodeEditor` 在多光标模式且有光标时，取主光标下 token，经 `SelectionHighlightModel` 求全文出现→逐行矩形，在 `decorationBox` 文本层叠加多条半透明紫色选区块（VSCode「选中所有匹配项」视觉）；仅用 `Box`/`offset`/`width`/`background` 稳定 API、无 clickable/pointerInput 不拦截输入，与 caret 竖线、批量编辑、撤销/重做、补全、minimap 既有行为互不干扰；仅按 `cursorTick` 重组。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 更新为 caret 竖线 + 多段选区高亮均已落地（并注明仍非 BasicTextField 原生多选区、真正原生选区编辑属后续）。
+- **验证**：`SelectionHighlightModel` 经 kotlinc 2.2.20 独立编译 + **96 项单测全通过**（normalize 交换/夹紧/零宽/排序/合并重叠与相邻；与 `CursorLayoutModel.lineColumnOf` 在 6 组文本×全偏移上逐点一致；单行/跨行/全文档/CRLF 跨行/tab 加权/像素换算；NaN 与负尺寸回退、非法 tab 回退、夹紧幂等、矩形上限、高亮幂等；token 边界与全词匹配、端到端同名词三段高亮）。`EditorArea.kt` 括号平衡与符号引用静态校验通过。完整 Compose/APK 编译以 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区（本轮为纯内核高亮叠加的视觉指示）、LSP/DAP、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。
+
 ## v0.3.16 — minimap 拖拽连续滑动：core:editor 浮点连续锚点内核 + 编辑器拖拽接线
 
 > 响应 2026-11-23 12:00 巡检日报 P1（minimap 拖拽连续滑动，v0.3.14 RELEASE 明确留待后续、唯一可离线/CI 安全且未重复项）。在线核对：HEAD `c44f598`，RELEASE 记至 v0.3.15，源码 HEAD `0036b4d`（v0.3.15）双 job success。日报 P2（真实 arm64 `libproot.so` 随包，需 NDK27 交叉编译 + arm64 真机）与 P4（阶段4/5/6 todo 无 assignee，成员仅所有者一人）经核对维持阻塞/现状，非仓库文件或无 SDK/NDK/真机不可完成，不重复；P3（BasicTextField 原生逐光标多段选区、LSP/DAP）工程量大，v0.3.15 已落地 caret 竖线定位，剩余部分逐项排期，本轮不重复。故本轮落地 P1。沿用 `MinimapModel` 的纯 Kotlin 内核 + 独立单测范式，保持三条不变量（无 host root / 官方源 / 仅 arm64）。

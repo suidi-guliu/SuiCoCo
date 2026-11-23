@@ -3,6 +3,7 @@ package com.suicoco.ui.editor
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.remember
@@ -29,6 +30,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -260,7 +262,9 @@ private fun CodeEditor(
  * v0.3.14 接线：点击某行横杠 → [MinimapModel.lineAt] 把点击行换算为源行号（截断时按比例放大）
  * → [MinimapModel.scrollAnchorLine] 求滚动锚点（目标行居中）→ [ScrollState.animateScrollTo]
  * 平滑滚动编辑器到目标行；同时用 [MinimapModel.viewportRect] 叠加视口高亮框。
- * 仅用稳定的 clickable / box API，不引入实验性手势接口。
+ * v0.3.16 接线：在整条 minimap 上按住拖拽 → [MinimapModel.scrollAnchorFromDrag] 把连续 y
+ * （保留小数、避免跳格）换算为滚动锚点 → [ScrollState.scrollTo] 即时跟手滚动；点击跳转保留。
+ * 仅用 pointerInput / detectVerticalDragGestures / clickable / Box 等稳定 API，不引入实验性手势接口。
  */
 @Composable
 private fun MinimapRail(
@@ -272,6 +276,10 @@ private fun MinimapRail(
     val model = remember { MinimapModel() }
     val layout = remember(content) { model.build(content) }
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    // 缩略列单行像素高（= DEFAULT_ROW_PX.dp）与顶部 padding：把拖拽 y 换算为「解析行」单位
+    val rowPxPx = with(density) { MinimapModel.DEFAULT_ROW_PX.dp.toPx() }
+    val topPadPx = with(density) { 10.dp.toPx() }
 
     // 视口高亮：以当前滚动像素反推首可见行（行高 >0 时），仅作视觉指示，不影响跳转。
     val firstVisible = if (lineHeightPx > 0f) (scrollState.value / lineHeightPx).toInt() else 0
@@ -289,9 +297,28 @@ private fun MinimapRail(
         scope.launch { scrollState.animateScrollTo(targetPx) }
     }
 
+    // 拖拽连续滚动（v0.3.16）：指针 y（相对 minimap 内容顶部，扣除 top padding）→ 连续解析行
+    // → scrollAnchorFromDrag 求居中锚点 → scrollTo 即时定位。detectVerticalDragGestures 为
+    // Compose Foundation 稳定 API；onVerticalDrag 直接吃 change.position.y（绝对位置，避免累加漂移）。
+    fun dragTo(yPx: Float) {
+        if (lineHeightPx <= 0f || rowPxPx <= 0f || layout.lineCount <= 0) return
+        val yInLines = (yPx - topPadPx) / rowPxPx
+        val anchor = model.scrollAnchorFromDrag(layout, yInLines, visibleLines)
+        val targetPx = (anchor * lineHeightPx).toInt().coerceAtLeast(0)
+        scope.launch { scrollState.scrollTo(targetPx) }
+    }
+
     Box(
         modifier = Modifier.fillMaxHeight().width(48.dp)
             .background(VscodeTheme.EditorBg)
+            // pointerInput 置于 padding 之前（更外层）：position.y 相对整条 rail 顶部，
+            // 故 dragTo 需扣除 topPadPx 才对准第 0 行；拖拽热区也覆盖整条 rail 更易抓取。
+            .pointerInput(layout, lineHeightPx, rowPxPx, topPadPx, visibleLines) {
+                detectVerticalDragGestures(
+                    onDragStart = { dragTo(it.y) },
+                    onVerticalDrag = { change, _ -> dragTo(change.position.y) }
+                )
+            }
             .padding(top = 10.dp, end = 2.dp)
     ) {
         Column {

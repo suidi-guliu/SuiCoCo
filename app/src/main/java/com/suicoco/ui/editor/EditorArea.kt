@@ -18,8 +18,11 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.suicoco.core.design.VscodeTheme
 import com.suicoco.core.editor.CursorLayoutModel
+import com.suicoco.core.editor.FindModel
 import com.suicoco.core.editor.MinimapModel
 import com.suicoco.core.editor.MultiCursorModel
 import com.suicoco.core.editor.SelectionHighlightModel
@@ -56,6 +60,43 @@ fun EditorArea(vm: MainViewModel) {
     val cursorModel = remember { MultiCursorModel() }
     var multiMode by remember { mutableStateOf(false) }
     var cursorTick by remember { mutableStateOf(0) } // 光标数变化触发重组
+
+    // 文件内查找（v0.3.18）：纯 Kotlin 内核 FindModel 计算匹配区间，状态提升到 EditorArea 顶层，
+    // 供查找栏、Ctrl+F 快捷键与 CodeEditor 高亮/跳转共享。全部匹配随文本与选项派生，切换文件自动重算。
+    val findModel = remember { FindModel() }
+    var findOpen by remember { mutableStateOf(false) }
+    var findQuery by remember { mutableStateOf("") }
+    var findIgnoreCase by remember { mutableStateOf(true) } // VSCode 默认忽略大小写
+    var findWholeWord by remember { mutableStateOf(false) }
+    var findIndex by remember { mutableStateOf(-1) } // 当前匹配索引，-1 表示未定位
+    var findTick by remember { mutableStateOf(0) } // 触发 CodeEditor 滚动到当前匹配
+    val findFocus = remember { FocusRequester() }
+    val activeContent = tabs.find { it.path == activePath }?.content.orEmpty()
+    val findMatches = remember(activeContent, findQuery, findIgnoreCase, findWholeWord) {
+        findModel.findAll(
+            activeContent, findQuery,
+            FindModel.Options(ignoreCase = findIgnoreCase, wholeWord = findWholeWord)
+        )
+    }
+    // 查询或选项变化后把当前项重置到首个匹配（空查询为 -1），避免索引指向旧结果。
+    LaunchedEffect(findQuery, findIgnoreCase, findWholeWord) {
+        findIndex = if (findMatches.isEmpty()) -1 else 0
+    }
+    fun openFind() {
+        findOpen = true
+        if (findMatches.isNotEmpty() && findIndex < 0) findIndex = 0
+    }
+    fun closeFind() { findOpen = false }
+    fun findNext() {
+        if (findMatches.isEmpty()) return
+        findIndex = findModel.nextIndex(findMatches, findIndex)
+        findTick++
+    }
+    fun findPrev() {
+        if (findMatches.isEmpty()) return
+        findIndex = findModel.previousIndex(findMatches, findIndex)
+        findTick++
+    }
 
     Column(modifier = Modifier.fillMaxSize().background(VscodeTheme.EditorBg)) {
         // 标签栏
@@ -88,6 +129,23 @@ fun EditorArea(vm: MainViewModel) {
                 cursorTick++
             }
         }
+        // 文件内查找栏（v0.3.18）：Ctrl+F 打开、Esc 关闭，输入即高亮全部匹配并定位首个。
+        if (findOpen) {
+            FindBar(
+                query = findQuery,
+                onQueryChange = { findQuery = it },
+                matchCount = findMatches.size,
+                currentIndex = findIndex,
+                ignoreCase = findIgnoreCase,
+                wholeWord = findWholeWord,
+                focusRequester = findFocus,
+                onToggleCase = { findIgnoreCase = !findIgnoreCase },
+                onToggleWord = { findWholeWord = !findWholeWord },
+                onPrev = { findPrev() },
+                onNext = { findNext() },
+                onClose = { closeFind() }
+            )
+        }
         // 多光标操作条：仅开启时显示，复用内核的列编辑放置与批量编辑能力。
         if (multiMode) {
             MultiCursorBar(
@@ -116,7 +174,21 @@ fun EditorArea(vm: MainViewModel) {
         Box(modifier = Modifier.fillMaxSize().weight(1f)) {
             val tab = tabs.find { it.path == activePath }
             if (tab != null) {
-                CodeEditor(tab, vm, cursorModel, multiMode, cursorTick)
+                CodeEditor(
+                    tab = tab,
+                    vm = vm,
+                    cursorModel = cursorModel,
+                    multiMode = multiMode,
+                    cursorTick = cursorTick,
+                    findMatches = findMatches,
+                    findIndex = findIndex,
+                    findTick = findTick,
+                    findModel = findModel,
+                    onOpenFind = { openFind() },
+                    onFindNext = { findNext() },
+                    onFindPrev = { findPrev() },
+                    onCloseFind = { closeFind() }
+                )
                 CompletionPopup(vm)
             } else {
                 WelcomeScreen(vm)
@@ -157,7 +229,15 @@ private fun CodeEditor(
     vm: MainViewModel,
     cursorModel: MultiCursorModel,
     multiMode: Boolean,
-    cursorTick: Int
+    cursorTick: Int,
+    findMatches: List<FindModel.Match>,
+    findIndex: Int,
+    findTick: Int,
+    findModel: FindModel,
+    onOpenFind: () -> Unit,
+    onFindNext: () -> Unit,
+    onFindPrev: () -> Unit,
+    onCloseFind: () -> Unit
 ) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
@@ -201,6 +281,32 @@ private fun CodeEditor(
         } else emptyList()
     }
 
+    // 文件内查找高亮（v0.3.18）：把 FindModel 的匹配区间交给 SelectionHighlightModel 拆成
+    // 逐行矩形，复用既有换算口径；当前匹配单独以更亮的颜色叠加。仅视觉指示，不拦截输入。
+    val findRects = remember(tab.content, findMatches, charWidthPx, lineHeightPx) {
+        if (findMatches.isEmpty()) emptyList()
+        else selectionModel.highlightOf(
+            tab.content, findModel.asSelectionPairs(findMatches), lineHeightPx, charWidthPx
+        )
+    }
+    val currentFindRect = remember(tab.content, findMatches, findIndex, charWidthPx, lineHeightPx) {
+        val match = findModel.matchAt(findMatches, findIndex)
+        if (match == null) null
+        else selectionModel.highlightOf(
+            tab.content, listOf(match.start to match.end), lineHeightPx, charWidthPx
+        ).firstOrNull()
+    }
+
+    // F3 / Ctrl+F 跳转后滚动到当前匹配所在行：用 CursorLayoutModel 求匹配起点的行号，
+    // 换算为像素后平滑滚动；findTick 变化才触发，输入过程（findIndex=0）也会定位首个匹配。
+    LaunchedEffect(findTick, findIndex) {
+        val match = findModel.matchAt(findMatches, findIndex)
+        if (match != null && lineHeightPx > 0f) {
+            val line = caretLayout.lineColumnOf(tab.content, match.start).line
+            scrollState.animateScrollTo((line * lineHeightPx).toInt().coerceAtLeast(0))
+        }
+    }
+
     Row(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier.fillMaxSize().weight(1f)
@@ -214,10 +320,17 @@ private fun CodeEditor(
                 // 这样 scrollState 才有真实 maxValue，minimap 的 animateScrollTo 才能定位目标行。
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 10.dp)
                     .onKeyEvent { e ->
-                        if (e.type != KeyEventType.KeyDown || !e.isCtrlPressed) return@onKeyEvent false
-                        when (e.key) {
-                            Key.Z -> { if (e.isShiftPressed) vm.redo() else vm.undo(); true }
-                            Key.Y -> { vm.redo(); true }
+                        if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
+                        // 查找快捷键（v0.3.18）：Ctrl+F 打开、F3/Shift+F3 跳转、Esc 关闭，
+                        // 均为稳定 Key 常量；输入焦点在文本域或查找栏时均可触发（查找栏另挂同级处理）。
+                        when {
+                            e.isCtrlPressed && e.key == Key.F -> { onOpenFind(); true }
+                            e.key == Key.F3 -> { if (e.isShiftPressed) onFindPrev() else onFindNext(); true }
+                            e.key == Key.Escape -> { onCloseFind(); true }
+                            e.isCtrlPressed && e.key == Key.Z -> {
+                                if (e.isShiftPressed) vm.redo() else vm.undo(); true
+                            }
+                            e.isCtrlPressed && e.key == Key.Y -> { vm.redo(); true }
                             else -> false
                         }
                     },
@@ -243,6 +356,32 @@ private fun CodeEditor(
                         }
                         Spacer(Modifier.width(40.dp))
                         inner()
+                        // 文件内查找高亮层（v0.3.18）：所有匹配淡黄底，当前匹配更亮的橙底。
+                        // 放在 inner() 之后绘制于文本之上、不放 clickable/pointerInput，不拦截输入。
+                        findRects.forEach { r ->
+                            Box(
+                                modifier = Modifier
+                                    .offset(
+                                        x = with(density) { (textStartPx + r.xPx).toDp() },
+                                        y = with(density) { (textTopPx + r.yPx).toDp() }
+                                    )
+                                    .width(with(density) { r.widthPx.toDp() })
+                                    .height(VscodeTheme.LINE_HEIGHT.dp)
+                                    .background(VscodeTheme.Yellow.copy(alpha = 0.20f))
+                            )
+                        }
+                        currentFindRect?.let { r ->
+                            Box(
+                                modifier = Modifier
+                                    .offset(
+                                        x = with(density) { (textStartPx + r.xPx).toDp() },
+                                        y = with(density) { (textTopPx + r.yPx).toDp() }
+                                    )
+                                    .width(with(density) { r.widthPx.toDp() })
+                                    .height(VscodeTheme.LINE_HEIGHT.dp)
+                                    .background(VscodeTheme.Accent.copy(alpha = 0.45f))
+                            )
+                        }
                         // 多段选区高亮层（v0.3.17）：逐行半透明矩形，坐标口径与文本 padding 对齐。
                         // 仅视觉指示，不放 clickable/pointerInput，不拦截键盘与触摸输入。
                         selectionRects.forEach { r ->
@@ -385,6 +524,82 @@ private fun MinimapRail(
                     .offset(y = topDp)
                     .background(VscodeTheme.Accent.copy(alpha = 0.10f))
             )
+        }
+    }
+}
+
+/**
+ * 文件内查找栏（v0.3.18）：纯 UI 映射，匹配计算全交由 [FindModel] 内核。
+ * - 输入框即时更新查询；↑/↓ 或回车循环跳转上一个/下一个匹配；
+ * - 「Aa」切换忽略大小写、「ab」切换全词匹配，选项变化由上层重算匹配并重置当前项；
+ * - Esc 关闭查找栏；计数显示为「当前/总数」，无匹配时显示 0/0。
+ * 仅用 BasicTextField / Row / Text / clickable / FocusRequester 等稳定 API。
+ */
+@Composable
+private fun FindBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    matchCount: Int,
+    currentIndex: Int,
+    ignoreCase: Boolean,
+    wholeWord: Boolean,
+    focusRequester: FocusRequester,
+    onToggleCase: () -> Unit,
+    onToggleWord: () -> Unit,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    onClose: () -> Unit
+) {
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .background(VscodeTheme.WidgetBg).padding(horizontal = 10.dp, vertical = 4.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("🔍", fontSize = 12.sp, color = VscodeTheme.FgMuted)
+            Spacer(Modifier.width(8.dp))
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.weight(1f).background(VscodeTheme.InputBg).padding(6.dp)
+                    .focusRequester(focusRequester)
+                    .onKeyEvent { e ->
+                        if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
+                        when {
+                            e.key == Key.Enter -> { onNext(); true }
+                            e.key == Key.F3 -> { if (e.isShiftPressed) onPrev() else onNext(); true }
+                            e.key == Key.Escape -> { onClose(); true }
+                            else -> false
+                        }
+                    },
+                singleLine = true,
+                textStyle = TextStyle(color = VscodeTheme.Fg, fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (matchCount == 0) "0/0" else "${if (currentIndex < 0) 0 else currentIndex + 1}/$matchCount",
+                color = VscodeTheme.FgDim, fontSize = 11.sp
+            )
+            Spacer(Modifier.width(8.dp))
+            ToolbarButton("↑", enabled = matchCount > 0, onClick = onPrev)
+            ToolbarButton("↓", enabled = matchCount > 0, onClick = onNext)
+        }
+        Spacer(Modifier.height(2.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ToolbarButton(
+                text = if (ignoreCase) "Aa ✓" else "Aa",
+                enabled = true,
+                onClick = onToggleCase
+            )
+            Spacer(Modifier.width(8.dp))
+            ToolbarButton(
+                text = if (wholeWord) "ab| ✓" else "ab|",
+                enabled = true,
+                onClick = onToggleWord
+            )
+            Spacer(Modifier.weight(1f))
+            ToolbarButton("关闭 Esc", enabled = true, onClick = onClose)
         }
     }
 }

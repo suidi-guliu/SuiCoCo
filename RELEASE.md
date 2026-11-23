@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.16 — minimap 拖拽连续滑动：core:editor 浮点连续锚点内核 + 编辑器拖拽接线
+
+> 响应 2026-11-23 12:00 巡检日报 P1（minimap 拖拽连续滑动，v0.3.14 RELEASE 明确留待后续、唯一可离线/CI 安全且未重复项）。在线核对：HEAD `c44f598`，RELEASE 记至 v0.3.15，源码 HEAD `0036b4d`（v0.3.15）双 job success。日报 P2（真实 arm64 `libproot.so` 随包，需 NDK27 交叉编译 + arm64 真机）与 P4（阶段4/5/6 todo 无 assignee，成员仅所有者一人）经核对维持阻塞/现状，非仓库文件或无 SDK/NDK/真机不可完成，不重复；P3（BasicTextField 原生逐光标多段选区、LSP/DAP）工程量大，v0.3.15 已落地 caret 竖线定位，剩余部分逐项排期，本轮不重复。故本轮落地 P1。沿用 `MinimapModel` 的纯 Kotlin 内核 + 独立单测范式，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **增强 `core/editor/src/main/java/com/suicoco/core/editor/MinimapModel.kt`（纯 Kotlin 标准库）**：新增 `scrollAnchorFromDrag(layout, yInLines, visibleLines)`——把缩略列上的**连续浮点 y**（以解析行为单位）换算为编辑器应滚动到的首个可见行，使手指所在位置尽量落在视口中央。与点击跳转 `lineAt + scrollAnchorLine` 的整数行不同，这里保留小数、避免拖拽时跳格；截断布局按比例还原回源行号，锚点夹紧到 `[0, sourceLineCount - visibleLines]`；失败安全（空布局/NaN/负数 y/非法可见数均安全回退）、纯函数幂等。既有 `lineAt`/`scrollAnchorLine`/`viewportRect`/`build` 行为不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：`MinimapRail` 的 Box 挂 `pointerInput` + `detectVerticalDragGestures`（**Compose Foundation 稳定 API，非实验性接口**），`onDragStart`/`onVerticalDrag` 均用指针绝对 y（扣除顶部 padding、按单行像素高换算为连续解析行）调用 `scrollAnchorFromDrag → scrollTo` 即时跟手滚动；pointerInput 置于 `padding` 之前覆盖整条 rail、更易抓取；每行 `clickable` 点击跳转（v0.3.14）保留，父级拖拽仅消费超过 touch slop 的纵向手势，二者互不干扰；键盘输入/撤销/补全/多光标/caret 叠加既有行为不变。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 更新 minimap 条目为「点击跳转 + 拖拽连续滑动均已接线」，标注 `scrollAnchorFromDrag` 归 `:core:editor`。
+- **验证**：`MinimapModel` 经 kotlinc 2.2.20 独立编译 + **37 项单测全通过**（新增拖拽用例：浮点连续/居中/夹紧/NaN/负数/可见数边界/截断按比例还原/单调性/幂等/整数 y 与点击锚点一致，并回归 v0.3.14 点击锚点、lineAt、viewportRect、build、CRLF）；`EditorArea.kt` 括号平衡（花括号 103/103、圆括号 325/325、方括号 8/8）与符号引用静态校验通过。完整 Compose/APK 编译以 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生逐光标多段选区高亮、LSP/DAP、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。
+
 ## v0.3.15 — 逐光标 caret 定位渲染：core:editor 偏移→行列内核 + 编辑器多光标竖线接线
 
 > 响应 2026-11-23 05:59 巡检日报 P3（编辑器增强余项「BasicTextField 逐光标选区渲染的多光标文本域，建议先做前者纯 UI 增强」）。在线核对：HEAD `7b260861`，RELEASE 记至 v0.3.14。日报 P1（minimap 点击跳转）已由 v0.3.14 完成、`lineAt/scrollAnchorLine/animateScrollTo/视口高亮`全部落地，跳过；P0（真实 arm64 `libproot.so` 随包，需 NDK27 交叉编译 + arm64 真机）与 P4（阶段4/5/6 todo 无 assignee，成员仅所有者一人）经核对维持阻塞/现状，非仓库文件或无 SDK/NDK/真机不可完成，不重复。故本轮落地 P3 中可离线、CI 安全、未重复的「逐光标定位渲染」：把此前黑盒式的光标偏移集合变成屏幕上可见的 caret 竖线。沿用 `UndoTree`/`MinimapModel`/`MultiCursorModel` 的纯 Kotlin 内核 + 独立单测范式。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

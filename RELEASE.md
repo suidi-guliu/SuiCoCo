@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.18 — 文件内查找（Find-in-file）：core:editor 匹配内核 + 编辑器查找栏接线
+
+> 响应 2026-11-24 06:01 巡检日报 P1（编辑器文件内查找内核 + UI 接线）。在线核对：HEAD `86a5366`（源码 `b260a88`，v0.3.17），RELEASE 记至 v0.3.17，双 job success；`core/editor` 无 FindModel、RELEASE 查找关键词 0 命中，P1 确未落地。日报 P2（真实 arm64 `libproot.so` 随包，需 NDK27 交叉编译 + arm64 真机）与 P4（阶段4/5/6 todo 无 assignee，成员仅所有者一人）经核对维持阻塞/现状，无 SDK/NDK/真机不可完成、非仓库文件，不重复；P3（BasicTextField 原生多段选区、LSP/DAP）工程量大，v0.3.17 已落地选区高亮视觉，LSP/DAP 非单轮可闭环。故本轮落地 P1，沿用纯 Kotlin 内核 + 独立单测范式，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/FindModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把文件内查找落地为真实内核。① `findAll(text, query, options)` 返回全部互不重叠、按 start 升序的匹配区间 `[start,end)`（UTF-16 code unit 口径），支持忽略大小写（`Options.ignoreCase`）与全词匹配（`Options.wholeWord`，词字符口径与 `SelectionHighlightModel` token 一致：字母/数字/`_`），命中上限默认 2048（非法上限回退默认）；② `nextIndex` / `previousIndex` 在匹配列表上循环（空列表返回 -1、-1 起点语义明确、超界夹紧），`indexAtOrAfter` / `indexAtOrBefore` 供按光标位置定位查找起点，`matchAt` 安全取当前项；③ `asSelectionPairs` 把匹配映射为 `(start,end)` 对，直接复用 `SelectionHighlightModel` 的高亮矩形内核，不重复实现行列/像素换算；④ 全部公开方法失败安全（空查询/空文本幂等、越界索引安全回退）、纯函数无隐藏状态，零 Android/Compose/三方依赖，core 不依赖 feature 的约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：新增 `FindBar` 查找栏——Ctrl+F 打开并聚焦输入框，输入即时重算并高亮全部匹配，↑/↓ 或 F3/Shift+F3 或回车循环跳转，『Aa』切换忽略大小写、『ab|』切换全词匹配并即时重算，计数字段显示「当前/总数」，Esc 关闭；文本域 `onKeyEvent` 用稳定 Key 常量接入 Ctrl+F/F3/Shift+F3/Esc，与既有 Ctrl+Z/Ctrl+Shift+Z/Ctrl+Y 撤销重做并存不冲突。查找状态提升到 `EditorArea` 顶层供查找栏与代码区共享，切文件自动重算。高亮层把所有匹配画为淡黄底、当前项叠加橙底（复用 `SelectionHighlightModel.highlightOf` 与文本同口径的逐行矩形，仅视觉指示不拦截输入）；跳转经 `CursorLayoutModel.lineColumnOf` 求匹配起点行号后 `animateScrollTo` 平滑定位；仅用 `BasicTextField`/`Box`/`offset`/`background`/`FocusRequester`/`onKeyEvent` 等稳定 API，无实验性接口。补全、撤销/重做、多光标/caret/选区、minimap 既有行为不变。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 更新为 v0.3.18 文件内查找已落地（纯内核 + UI 叠加 + 查找栏接线），标注 LSP 级语义查找仍属后续。
+- **验证**：`FindModel` 经 kotlinc 2.2.20 独立编译（连带 `SelectionHighlightModel`/`CursorLayoutModel` 一并编译确保符号一致）+ **41 项单测全通过**（子串/多字符/重叠不重叠/中文 code unit；大小写敏感默认与忽略大小写；全词边界与下划线、全词+忽略大小写组合；匹配上限与非法上限回退；next/prev 从 -1、推进、循环回绕、超界夹紧、空列表、单匹配；atOrAfter/atOrBefore 起点与回绕；matchAt 越界 null；asSelectionPairs 与复用高亮矩形；findAll 幂等）。`EditorArea.kt` 括号平衡（花括号 163/163、圆括号 494/494、方括号 9/9）与符号引用静态校验通过（修正一处 `highlightRects`→`highlightOf` 的 Pair/Selection 类型匹配）；Compose BOM 2025.08.00 支持 Key.F3/Escape/Enter。完整 Compose/APK 编译以 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区（本轮查找为纯内核高亮叠加视觉）、LSP（语义级查找/跳转）与 DAP、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。
+
 ## v0.3.17 — 逐光标多段选区高亮：core:editor 选区拆分内核 + 编辑器选区块接线
 
 > 响应 2026-11-23 18:00 巡检日报 P3（编辑器增强余项「BasicTextField 原生逐光标多段选区高亮」）。在线核对：HEAD `1dd4921`（源码 HEAD `28fa2f9`），RELEASE 记至 v0.3.16，双 job success。日报 P1（minimap 拖拽连续滑动）已由 v0.3.16 完成，跳过；P2（真实 arm64 `libproot.so` 随包，需 NDK 交叉编译 + arm64 真机）与 P4（阶段4/5/6 todo 无 assignee，成员仅所有者一人）经核对维持阻塞/现状，非仓库文件或无 SDK/NDK/真机不可完成，不重复；P3 中 LSP/DAP 工程量巨大，非单轮可闭环。故本轮落地 P3 中可离线、CI 安全、未重复的「多段选区高亮」，沿用纯 Kotlin 内核 + 独立单测范式，保持三条不变量（无 host root / 官方源 / 仅 arm64）。

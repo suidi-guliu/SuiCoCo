@@ -41,6 +41,7 @@ import com.suicoco.core.design.VscodeTheme
 import com.suicoco.core.editor.CursorLayoutModel
 import com.suicoco.core.editor.MinimapModel
 import com.suicoco.core.editor.MultiCursorModel
+import com.suicoco.core.editor.SelectionHighlightModel
 import com.suicoco.data.EditorTab
 import com.suicoco.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
@@ -184,6 +185,22 @@ private fun CodeEditor(
         else emptyList()
     }
 
+    // 逐光标多段选区高亮（v0.3.17）：取主光标下的标识符 token，用纯 Kotlin 内核
+    // SelectionHighlightModel 找出它在全文的全部出现并拆成逐行高亮矩形，在文本域叠加
+    // 半透明选区块——VSCode「选中所有匹配项」的视觉。仅多光标模式且有光标时显示，
+    // 与 caret 竖线、批量编辑、撤销、补全、minimap 互不干扰；内核零依赖、可独立单测。
+    val selectionModel = remember { SelectionHighlightModel() }
+    val selectionRects = remember(tab.content, cursorTick, multiMode, charWidthPx, lineHeightPx) {
+        if (multiMode && cursorModel.cursorCount() > 0) {
+            val token = selectionModel.tokenRangeOf(tab.content, cursorModel.primaryCursor())
+            if (token.first < token.second) {
+                val name = tab.content.substring(token.first, token.second)
+                val occ = selectionModel.occurrencesOf(tab.content, name)
+                selectionModel.highlightRects(tab.content, occ, lineHeightPx, charWidthPx)
+            } else emptyList()
+        } else emptyList()
+    }
+
     Row(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier.fillMaxSize().weight(1f)
@@ -226,6 +243,20 @@ private fun CodeEditor(
                         }
                         Spacer(Modifier.width(40.dp))
                         inner()
+                        // 多段选区高亮层（v0.3.17）：逐行半透明矩形，坐标口径与文本 padding 对齐。
+                        // 仅视觉指示，不放 clickable/pointerInput，不拦截键盘与触摸输入。
+                        selectionRects.forEach { r ->
+                            Box(
+                                modifier = Modifier
+                                    .offset(
+                                        x = with(density) { (textStartPx + r.xPx).toDp() },
+                                        y = with(density) { (textTopPx + r.yPx).toDp() }
+                                    )
+                                    .width(with(density) { r.widthPx.toDp() })
+                                    .height(VscodeTheme.LINE_HEIGHT.dp)
+                                    .background(VscodeTheme.Purple.copy(alpha = 0.24f))
+                            )
+                        }
                         // 多光标 caret 叠加层：逐光标竖线（内核算行列→像素，UI 只做定位绘制）。
                         // 使用 Box + offset + background 等稳定 API，坐标口径与文本 padding 对齐。
                         caretPoints.forEach { cp ->

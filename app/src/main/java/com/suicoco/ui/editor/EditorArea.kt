@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.suicoco.core.design.VscodeTheme
+import com.suicoco.core.editor.CursorLayoutModel
 import com.suicoco.core.editor.MinimapModel
 import com.suicoco.core.editor.MultiCursorModel
 import com.suicoco.data.EditorTab
@@ -112,7 +113,7 @@ fun EditorArea(vm: MainViewModel) {
         Box(modifier = Modifier.fillMaxSize().weight(1f)) {
             val tab = tabs.find { it.path == activePath }
             if (tab != null) {
-                CodeEditor(tab, vm)
+                CodeEditor(tab, vm, cursorModel, multiMode, cursorTick)
                 CompletionPopup(vm)
             } else {
                 WelcomeScreen(vm)
@@ -148,7 +149,13 @@ private fun TabItem(tab: EditorTab, active: Boolean, vm: MainViewModel) {
 }
 
 @Composable
-private fun CodeEditor(tab: EditorTab, vm: MainViewModel) {
+private fun CodeEditor(
+    tab: EditorTab,
+    vm: MainViewModel,
+    cursorModel: MultiCursorModel,
+    multiMode: Boolean,
+    cursorTick: Int
+) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
     // 说明：BasicTextField 内部自行滚动且旧的 value/onValueChange 重载不暴露 scrollState，
@@ -161,6 +168,19 @@ private fun CodeEditor(tab: EditorTab, vm: MainViewModel) {
     var viewportPx by remember { mutableStateOf(0f) }
     val visibleLines = if (lineHeightPx > 0f && viewportPx > 0f)
         (viewportPx / lineHeightPx).toInt().coerceAtLeast(1) else 1
+
+    // 逐光标 caret 定位：把 MultiCursorModel 的文本偏移经纯 Kotlin 内核 CursorLayoutModel
+    // 换算为像素坐标，在文本域叠加多条竖线，让「每个光标落在哪一行哪一列」可见。
+    // 等宽字体列宽按字号近似（与 minimap 行高估算同口径），仅作视觉指示，不影响编辑语义。
+    val charWidthPx = with(density) { (VscodeTheme.FONT_SIZE * 0.6f).sp.toPx() }
+    val textStartPx = with(density) { 16.dp.toPx() }
+    val textTopPx = with(density) { 10.dp.toPx() }
+    val caretLayout = remember { CursorLayoutModel() }
+    val caretPoints = remember(tab.content, cursorTick, multiMode, charWidthPx, lineHeightPx) {
+        if (multiMode && cursorModel.cursorCount() > 1)
+            caretLayout.carets(tab.content, cursorModel.cursors(), lineHeightPx, charWidthPx)
+        else emptyList()
+    }
 
     Row(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -204,6 +224,20 @@ private fun CodeEditor(tab: EditorTab, vm: MainViewModel) {
                         }
                         Spacer(Modifier.width(40.dp))
                         inner()
+                        // 多光标 caret 叠加层：逐光标竖线（内核算行列→像素，UI 只做定位绘制）。
+                        // 使用 Box + offset + background 等稳定 API，坐标口径与文本 padding 对齐。
+                        caretPoints.forEach { cp ->
+                            Box(
+                                modifier = Modifier
+                                    .offset(
+                                        x = with(density) { (textStartPx + cp.xPx).toDp() },
+                                        y = with(density) { (textTopPx + cp.yPx).toDp() }
+                                    )
+                                    .width(2.dp)
+                                    .height(VscodeTheme.LINE_HEIGHT.dp)
+                                    .background(VscodeTheme.Purple)
+                            )
+                        }
                     }
                 }
             )

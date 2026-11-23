@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.15 — 逐光标 caret 定位渲染：core:editor 偏移→行列内核 + 编辑器多光标竖线接线
+
+> 响应 2026-11-23 05:59 巡检日报 P3（编辑器增强余项「BasicTextField 逐光标选区渲染的多光标文本域，建议先做前者纯 UI 增强」）。在线核对：HEAD `7b260861`，RELEASE 记至 v0.3.14。日报 P1（minimap 点击跳转）已由 v0.3.14 完成、`lineAt/scrollAnchorLine/animateScrollTo/视口高亮`全部落地，跳过；P0（真实 arm64 `libproot.so` 随包，需 NDK27 交叉编译 + arm64 真机）与 P4（阶段4/5/6 todo 无 assignee，成员仅所有者一人）经核对维持阻塞/现状，非仓库文件或无 SDK/NDK/真机不可完成，不重复。故本轮落地 P3 中可离线、CI 安全、未重复的「逐光标定位渲染」：把此前黑盒式的光标偏移集合变成屏幕上可见的 caret 竖线。沿用 `UndoTree`/`MinimapModel`/`MultiCursorModel` 的纯 Kotlin 内核 + 独立单测范式。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/CursorLayoutModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把文本偏移映射为可见的光标位置。① `lineColumnOf(text, offset, tabWidth)` 返回 0-based `(line, column)`，列按 UTF-16 code unit 计、tab 按可配置宽度（默认 4，非法值回退）加权，CRLF 视为单换行且 offset 停在 `\r`/`\n` 之间归本行行尾、孤立 `\r` 视为换行；② `carets(text, offsets, lineHeightPx, charWidthPx)` 批量把一组偏移换算为像素坐标 `CaretPoint(offset,line,column,xPx,yPx)`，偏移夹紧去重升序、容量上限默认 64（超出取最小的 cap 个）、NaN/负像素尺寸回退 0、空输入幂等；③ 全部公开方法失败安全、纯函数幂等、无隐藏状态，零 Android/Compose/三方依赖，core 不依赖 feature 的约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：`CodeEditor` 接收 `cursorModel`/`multiMode`/`cursorTick`，在 `decorationBox` 文本层按 `CursorLayoutModel.carets` 的结果叠加多条 2dp×行高的 caret 竖线（等宽字体列宽按字号 0.6 倍近似，与 minimap 行高估算同口径，仅作视觉指示）；仅在多光标模式且有 >1 个光标时显示，按 `cursorTick` 重组，与批量编辑/撤销树/补全/minimap 既有行为互不干扰。仅用 `Box`/`Modifier.offset`/`background` 等稳定 API，未引入实验性接口。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 更新为「逐光标 caret 定位渲染已落地（偏移→行列→像素内核 + 竖线叠加），但非 BasicTextField 原生多选区，真正逐光标选区仍属后续」，并补注复用 `MultiCursorModel.cursors()` 的接线说明。
+- **验证**：`CursorLayoutModel` 经 kotlinc 2.2.20 独立编译 + **33 项单测全通过**（空文本/负与超长夹紧/单行与多行行列/换行符边界/tab 展开与非法回退/CRLF 中间归行尾/孤立 CR/批量去重排序夹紧/像素换算/非法尺寸回退/容量上限/幂等/中文按 code unit 计列）；单测过程中修正的均为测试期望值（文本长度与容量样本），内核逻辑一次通过。`EditorArea.kt` 括号平衡（花括号 96/96、圆括号 309/309、方括号 6/6）与符号引用静态校验通过；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。完整 Compose/APK 编译以 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生逐光标多段选区高亮（本轮落地的是 caret 竖线定位）、LSP/DAP、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。
+
 ## v0.3.14 — minimap 点击跳转：core:editor 滚动锚点内核 + 视口高亮接线
 
 > 响应 2026-11-22 23:59 巡检日报 P1（minimap 点击跳转滚动接线）。在线核对：HEAD `367fc90c`，RELEASE 记至 v0.3.13（多光标已由上一轮落地，日报 P2 多光标已完成故跳过），双 job success。P0（真实 arm64 `libproot.so` 随包，需 NDK 交叉编译 + arm64 真机）维持阻塞；日报三条优先级中仅 P1 可离线、CI 安全地落地，故本轮把已就绪的 `MinimapModel.lineAt` 内核接到编辑器滚动。沿用 `UndoTree`/`MinimapModel`/`MultiCursorModel` 的纯 Kotlin 内核 + 独立单测范式。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

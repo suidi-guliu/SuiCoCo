@@ -118,6 +118,33 @@ class MinimapModel(private val config: Config = Config()) {
         return anchor.coerceIn(0, total - visible)
     }
 
+    /**
+     * 拖拽连续滑动的滚动锚点：把「缩略列上的连续浮点 y（以解析行为单位）」直接换算为
+     * 编辑器应滚动到的首个可见行，使手指所在的缩略位置尽量落在视口中央。
+     *
+     * 与 [lineAt] + [scrollAnchorLine] 的点击跳转不同：这里 [yInLines] 保留小数，避免把
+     * 拖拽位置先取整到整行造成的跳格，连续拖动更平滑；截断布局同样按比例放大回源行号。
+     * 具体换算：把 y 按解析行→源行比例放大得 sourcePos，视口上移半个可见行数，再夹紧到
+     * `[0, sourceLineCount - visibleLines]`。
+     *
+     * 失败安全：空布局返回 0；[yInLines] 为 NaN / 负数视为 0；[visibleLines] <=0 视为 1、
+     * 超过源行数夹紧；超出范围的 y 夹紧到源范围；纯函数幂等，无 Android/Compose 依赖。
+     */
+    fun scrollAnchorFromDrag(layout: MinimapLayout, yInLines: Float, visibleLines: Int): Int {
+        val total = layout.sourceLineCount
+        if (total <= 0) return 0
+        val visible = min(max(1, visibleLines), total)
+        val y = if (yInLines.isNaN() || yInLines < 0f) 0f else yInLines
+        // 解析行坐标 → 源文档行坐标（截断时按比例放大），保留浮点精度
+        val sourcePos = if (!layout.truncated || layout.lineCount <= 0) {
+            y
+        } else {
+            y / layout.lineCount * total
+        }
+        val anchor = sourcePos - visible / 2f
+        return anchor.toInt().coerceIn(0, total - visible)
+    }
+
     /** 每次滚动的像素行距换算：行高像素 → 缩略行单位。非法 rowPx 回退默认。 */
     fun pixelsToLines(pixels: Float): Float {
         val px = if (config.rowPx > 0f && !config.rowPx.isNaN()) config.rowPx else DEFAULT_ROW_PX

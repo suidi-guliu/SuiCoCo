@@ -9,7 +9,7 @@
       "version": "0.1.0",
       "description": "第三方插件开发示例：注册命令与状态栏消息，演示 .suicj 插件 API 最小用法。",
       "file": "suicj.example.hello.suicj",
-      "sha256": "45c11a25f80babf711d62422aada911c726b52423e57a452929ac810e7cd4ebe",
+      "sha256": "61808f3ec2b792bb8f9093e770c76581ee90849b28e43dee96f036caa4b37d5c",
       "engine": ">=0.1.0",
       "requiresEnv": null
     },
@@ -19,7 +19,7 @@
       "version": "0.1.0",
       "description": "C 与 C++ 语法高亮、代码补全、代码片段与编译运行任务（依赖 cpp 语言环境，官方源安装）。",
       "file": "suicj.lang.c-cpp.suicj",
-      "sha256": "9a4db4384582a2e0f642e12455c604d52972abe97abe25f36602ffc072c269b7",
+      "sha256": "08c8f79865ac832875de41a3f1247a3400ead6330c90021e14cc5dbf8f8dce4b",
       "engine": ">=0.1.0",
       "requiresEnv": "cpp"
     },
@@ -29,7 +29,7 @@
       "version": "0.1.0",
       "description": "Java 语法高亮、补全、代码片段与编译运行任务（依赖 java 语言环境 OpenJDK，官方源安装）。",
       "file": "suicj.lang.java.suicj",
-      "sha256": "1e0ad024db41e733f7a3a52396e15ec7026924258e84fb83a32b71186a6a5127",
+      "sha256": "7dfaa73e311d9ba146f4bc661198214768f389fdcfcd333c5606b020f31ab52a",
       "engine": ">=0.1.0",
       "requiresEnv": "java"
     },
@@ -39,7 +39,7 @@
       "version": "0.1.0",
       "description": "Python 语法高亮、补全、片段与运行任务（依赖 python 语言环境，官方源安装）。",
       "file": "suicj.lang.python.suicj",
-      "sha256": "58bd630c5c0e000678999f226748aef6b277bc8495fe9a0ebe31ae915b2eb784",
+      "sha256": "97c19914fabffbdc4bde3b9acb2bcc5a4013a51f25146b5d709c3a09806da1f3",
       "engine": ">=0.1.0",
       "requiresEnv": "python"
     }

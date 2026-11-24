@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.20 — 括号匹配高亮与跳转：core:editor 配对内核 + 编辑器光标接线
+
+> 响应 2026-11-24 12:10 巡检日报 P3「编辑器增强余项」。在线核对：main HEAD `50101b35`（源码 `a818b3be`，RELEASE v0.3.19），`Build suicoco`（run 45325016178）与 `build-plugins`（run 45325016222）双 job success，tags/Release 仍为里程碑 v0.3.4。日报 P1「查找替换」已由 v0.3.19 落地，按幂等原则跳过；P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P4「阶段4/5/6 todo 无 assignee」成员仅所有者一人，非仓库文件，维持现状。P3 中 BasicTextField 原生多段选区与 LSP/DAP 工程量大、非单轮可闭环，故从同一「编辑器增强余项」中挑出可离线/CI 安全、未重复的 VSCode 基础能力——括号匹配，沿用纯 Kotlin 内核 + 独立单测范式。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/BracketMatchModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把光标旁括号的配对计算落地为独立内核。① 扫描文本识别代码区 `()[]{}`，跳过双引号字符串、字符字面量、`//` 行注释与 `/* */` 块注释，未闭合字符串在换行处容错恢复；② 数组栈配对，失配不强行匹配，结果确定可预测；③ `matchAt(text, offset)` 先看左侧 `offset-1` 再看右侧 `offset`，返回一对单字符半开区间，直接复用 `SelectionHighlightModel` 拆矩形；④ `jumpToMatch` 在左右括号间跳转，`unmatchedOf`/`isBalanced` 可供状态提示；⑤ 括号数上限 4096、偏移夹紧、空输入与非法上限失败安全幂等，不处理 `<>`（泛型/比较歧义），零 Android/Compose/三方依赖，core 不依赖 feature 的约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：`BasicTextField` 改用 `TextFieldValue` 重载以读取 `selection.end` 作为光标位置；外部内容变化（撤销/重做/查找替换/多光标回写）经 `LaunchedEffect` 同步文本并夹紧选区，编辑语义不变。光标左右相邻括号由内核求出配对后，在文本域叠加亮黄单字符高亮块（与查找高亮同口径，`Box+offset+background` 稳定 API，不拦截输入）；Ctrl+Shift+\ 跳转到配对括号。补全、撤销/重做、查找/替换、caret/多段选区、多光标、minimap 既有行为不变。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 追加 v0.3.20 括号匹配条目，标注仍为词法级视觉指示，LSP 语义级配对属后续。
+- **验证**：`BracketMatchModel` 经 Kotlin 2.2.20（`kotlin-compiler-embeddable`）真实编译并运行 **35 项单测全通过**（简单/嵌套/混合括号、失配、`matchesOf` 顺序、字符串/字符/行注释/块注释/转义/未闭合字符串/CRLF 容错、光标左右边界优先级、`jumpToMatch` 四方向与幂等、偏移夹紧、中文 UTF-16、tab/换行、`<>` 忽略、容量上限、2000 层深嵌套与幂等）；`EditorArea.kt` 按词法排除注释/字符串后的括号平衡（花括号 193/193、圆括号 582/582）与新增符号引用静态核对通过；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区、LSP（语义级配对/重命名/跳转）与 DAP、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。
+
 ## v0.3.19 — 文件内查找替换（Find & Replace）：core:editor 替换内核 + 编辑器替换行接线
 
 > 响应 2026-11-24 06:01 巡检日报 P3「编辑器增强余项」中**可离线/CI 安全、未重复的查找替换闭环**——v0.3.18 已落地 P1 的「找得到、跳得动」，但查找栏只能跳转不能改写；本轮补齐 VSCode 最核心的后续动作「替换当前 / 全部替换」，延续纯 Kotlin 内核 + 独立单测范式，不触碰 BasicTextField 原生多选区与 LSP/DAP 等超出单轮范围的余项。在线核对：HEAD `81efff1`（源码 `4d37066`，v0.3.18），RELEASE 记至 v0.3.18，最终双 job success；`core/editor` 仅有 FindModel 无 ReplaceModel，查找栏无替换控件，确未落地。日报 P2（真实 arm64 `libproot.so` 随包，需 NDK27 交叉编译 + arm64 真机）与 P4（阶段4/5/6 todo 无 assignee，成员仅所有者一人）经核对维持阻塞/现状，不重复；P3 中 LSP/DAP 与 BasicTextField 原生多段选区工程量大，非单轮可闭环。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

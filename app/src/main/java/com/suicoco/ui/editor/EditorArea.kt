@@ -46,6 +46,7 @@ import com.suicoco.core.design.VscodeTheme
 import com.suicoco.core.editor.BracketMatchModel
 import com.suicoco.core.editor.CursorLayoutModel
 import com.suicoco.core.editor.FindModel
+import com.suicoco.core.editor.FoldingModel
 import com.suicoco.core.editor.MinimapModel
 import com.suicoco.core.editor.MultiCursorModel
 import com.suicoco.core.editor.ReplaceModel
@@ -88,6 +89,10 @@ fun EditorArea(vm: MainViewModel) {
     var replaceOpen by remember { mutableStateOf(false) }
     var replaceText by remember { mutableStateOf("") }
     var replaceNotice by remember { mutableStateOf("") }
+    // 代码折叠（v0.3.21）：纯 Kotlin FoldingModel 识别可折叠区间，折叠/展开结果经
+    // vm.updateContent 写回，撤销树自动同步。foldTick 在每次折叠/展开后自增，触发行号栏重组。
+    val foldingModel = remember { FoldingModel() }
+    var foldTick by remember { mutableStateOf(0) }
     // 查询或选项变化后把当前项重置到首个匹配（空查询为 -1），避免索引指向旧结果。
     LaunchedEffect(findQuery, findIgnoreCase, findWholeWord) {
         findIndex = if (findMatches.isEmpty()) -1 else 0
@@ -227,7 +232,10 @@ fun EditorArea(vm: MainViewModel) {
                     onOpenReplace = { openReplace() },
                     onFindNext = { findNext() },
                     onFindPrev = { findPrev() },
-                    onCloseFind = { closeFind() }
+                    onCloseFind = { closeFind() },
+                    foldingModel = foldingModel,
+                    foldTick = foldTick,
+                    onFoldChanged = { foldTick++ }
                 )
                 CompletionPopup(vm)
             } else {
@@ -278,7 +286,10 @@ private fun CodeEditor(
     onOpenReplace: () -> Unit,
     onFindNext: () -> Unit,
     onFindPrev: () -> Unit,
-    onCloseFind: () -> Unit
+    onCloseFind: () -> Unit,
+    foldingModel: FoldingModel,
+    foldTick: Int,
+    onFoldChanged: () -> Unit
 ) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
@@ -370,6 +381,20 @@ private fun CodeEditor(
         if (target != caretOffset) fieldValue = fieldValue.copy(selection = TextRange(target))
     }
 
+    // 代码折叠（v0.3.21）：纯 Kotlin FoldingModel 识别可折叠区间（花括号配对 + 缩进块）。
+    // 折叠区间随文本变化重算；折叠态由内核按 path+起始行记快照，foldTick 变化触发行号栏重组。
+    // 折叠/展开结果经 vm.updateContent 回写，撤销树可整步回退，补全/minimap/查找自动刷新。
+    val foldRegions = remember(tab.content, foldTick) { foldingModel.regionsOf(tab.content) }
+    fun foldAt(line: Int) {
+        val region = foldingModel.regionAt(foldRegions, line) ?: return
+        val next = foldingModel.fold(tab.path, tab.content, region)
+        if (next != tab.content) { vm.updateContent(tab.path, next); onFoldChanged() }
+    }
+    fun unfoldAt(line: Int) {
+        val next = foldingModel.unfold(tab.path, tab.content, line)
+        if (next != tab.content) { vm.updateContent(tab.path, next); onFoldChanged() }
+    }
+
     // F3 / Ctrl+F 跳转后滚动到当前匹配所在行：用 CursorLayoutModel 求匹配起点的行号，
     // 换算为像素后平滑滚动；findTick 变化才触发，输入过程（findIndex=0）也会定位首个匹配。
     LaunchedEffect(findTick, findIndex) {
@@ -422,16 +447,39 @@ private fun CodeEditor(
                 ),
                 decorationBox = { inner ->
                     Box {
-                        // 行号栏（静态演示 1..N）
+                        // 行号栏 + 折叠标记（v0.3.21）：每行左侧固定宽度区域。
+                        // 折叠态优先显示 ▸（点击展开），否则可折叠区间首行显示 ▾（点击折叠）；
+                        // 标记用 clickable，仅占行号栏空白区，不影响 BasicTextField 输入焦点。
+                        // foldTick 参与重组键，保证折叠后行数/状态变化立即刷新。
                         Column {
                             for (i in 1..sourceLineCount.coerceAtMost(60)) {
-                                Text(
-                                    i.toString().padStart(2),
-                                    color = VscodeTheme.FgDim,
-                                    fontSize = VscodeTheme.FONT_SIZE.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    lineHeight = VscodeTheme.LINE_HEIGHT.sp
-                                )
+                                val zeroLine = i - 1
+                                Row(
+                                    modifier = Modifier.height(VscodeTheme.LINE_HEIGHT.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    val foldedHere = foldingModel.isFolded(tab.path, zeroLine)
+                                    val foldableHere = !foldedHere && foldingModel.regionAt(foldRegions, zeroLine) != null
+                                    Box(
+                                        modifier = Modifier.width(14.dp).height(VscodeTheme.LINE_HEIGHT.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (foldedHere) {
+                                            Text("▸", color = VscodeTheme.Accent, fontSize = 11.sp,
+                                                modifier = Modifier.clickable { unfoldAt(zeroLine) })
+                                        } else if (foldableHere) {
+                                            Text("▾", color = VscodeTheme.FgDim, fontSize = 11.sp,
+                                                modifier = Modifier.clickable { foldAt(zeroLine) })
+                                        }
+                                    }
+                                    Text(
+                                        i.toString().padStart(2),
+                                        color = VscodeTheme.FgDim,
+                                        fontSize = VscodeTheme.FONT_SIZE.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        lineHeight = VscodeTheme.LINE_HEIGHT.sp
+                                    )
+                                }
                             }
                         }
                         Spacer(Modifier.width(40.dp))

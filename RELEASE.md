@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.22 — 行注释切换（Toggle Line Comment）：core:editor 注释内核 + 编辑器工具栏/Ctrl+/ 接线
+
+> 响应 2026-11-25 00:06 巡检日报（11-24 23:59 轮次）P3「编辑器增强余项」。在线核对：main HEAD `e3a7ccf`（产物提交）/ 源码 `3aa70f6`，RELEASE v0.3.21，`Build suicoco` 与 `build-plugins` 双 job success，tags/Release 仍为里程碑 v0.3.4。日报 P1「代码折叠」已由 v0.3.21 落地，按幂等原则跳过；P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P4「CI `upload-artifact@v5` Node 20 告警」经核对两 job 仍 success，属评估项、改动 CI 有破坏已打通构建的风险，本轮不改；P5「todo 无 assignee」非仓库文件、成员仅所有者一人，维持现状。沿用前几轮「从编辑器增强余项挑一个可离线/CI 安全、未重复的 VSCode 基础能力」范式，本轮从 P3 中挑出「行注释切换」落地。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/CommentModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把 VSCode 最高频的基础编辑能力之一「行注释切换」落地为独立内核。① `tokenFor` 按文件扩展名推断行注释符号——`//`（Kotlin/Java/C/C++/JS/Go/Rust/CSS 等默认）、`#`（Python/Shell/YAML/TOML/Ruby/Perl/Gradle 等）、`--`（Lua/SQL/Haskell）、`REM`（bat/cmd），未识别回退 `//`；② `toggle(text, startLine, endLine, token, caret)` 对光标行或选区涉及的多行，若全部非空白行均已注释则统一去注释、否则把未注释行统一加注释（混合选区一次收敛为全注释），纯空白行跳过、不参与判定；③ 加注释在行首缩进后插入 `token + " "`，去注释仅删 `token` 及紧随的一个空格，完整保留缩进、行尾空格与 CRLF/LF/CR 原换行符；④ 光标偏移随本行增删同步前后移动，落在被删区间内则夹到删除起点；⑤ `lineCount`/`lineOfOffset`/`isLineCommented` 辅助 API，单次处理行数上限 512，空文本/越界行/空 token 均失败安全幂等，零 Android/Compose/三方依赖，core 不依赖 feature 约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：编辑工具栏新增「// 注释」按钮（有活动文件时可用），`EditorArea` 顶层持有 `CommentModel` 实例与 `commentRequest` 递增计数；`CodeEditor` 的 `toggleComment()` 取当前选区（或光标）覆盖的首末行、按 `tab.path` 推断注释符号、调用内核统一切换，结果经 `MainViewModel.updateContent` 回写——撤销树可整步回退，补全/minimap/查找/折叠高亮自动刷新，新光标偏移由内核随增删同步；工具栏按钮（计数递增触发 `LaunchedEffect`）与 Ctrl+/ 快捷键（`Key.Slash`）共用同一切换函数。折叠/查找替换/括号匹配/多光标/caret/选区/minimap 既有行为不变。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 追加 v0.3.22 行注释切换条目，标注为纯文本行级切换（符号按扩展名启发式、非 LSP 语义），块注释与语义注释属后续。
+- **验证**：`CommentModel` 经 Kotlin 编译器（kotlinc 2.2.20）真实编译并运行 **65 项单测全通过**（`tokenFor` 多语言符号与大小写、lineCount/lineOfOffset 夹紧、单行加/去注释与缩进/tab 保留、幂等往返、多行整块判定、混合态一次收敛、空白行跳过、CRLF/LF/CR 保留、尾换行、部分行范围、空文本/空 token/越界/负光标失败安全、光标增删位移与删区间夹紧、`isLineCommented`、容量上限）；`EditorArea.kt` 按词法排除注释/字符串后的花括号 213/213、圆括号 633/633 平衡，新增符号引用静态核对通过；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP（语义级折叠/配对/重命名/跳转/注释）与 DAP、CI `upload-artifact` Node 版本告警评估、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。
+
 ## v0.3.21 — 代码折叠（Code Folding）：core:editor 折叠区间内核 + 编辑器行号栏折叠标记接线
 
 > 响应 2026-11-24 18:00 巡检日报 P1「代码折叠内核 + 编辑器折叠接线」。在线核对：main HEAD `199bf9b8`（源码 `98b7e50a`，RELEASE v0.3.20），`core/editor` 无 `FoldingModel`、RELEASE/ARCHITECTURE 无折叠条目，按幂等原则确认为未落地项。上一轮（18:17 回复）引用的是 12:00 日报 P1「查找替换」（已由 v0.3.19 完成），非本轮 18:00 日报 P1，故本轮补齐代码折叠。P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3「编辑器增强余项」中 BasicTextField 原生多段选区、LSP/DAP 工程量大、非单轮可闭环，维持后续；P4「CI `upload-artifact@v5` Node 20 告警」经核对两 job 仍 success，属评估项，改动 CI 有破坏已打通构建的风险，本轮不改、维持现状。P5「todo 无 assignee」非仓库文件、成员仅所有者一人，维持现状。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.21 — 代码折叠（Code Folding）：core:editor 折叠区间内核 + 编辑器行号栏折叠标记接线
+
+> 响应 2026-11-24 18:00 巡检日报 P1「代码折叠内核 + 编辑器折叠接线」。在线核对：main HEAD `199bf9b8`（源码 `98b7e50a`，RELEASE v0.3.20），`core/editor` 无 `FoldingModel`、RELEASE/ARCHITECTURE 无折叠条目，按幂等原则确认为未落地项。上一轮（18:17 回复）引用的是 12:00 日报 P1「查找替换」（已由 v0.3.19 完成），非本轮 18:00 日报 P1，故本轮补齐代码折叠。P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3「编辑器增强余项」中 BasicTextField 原生多段选区、LSP/DAP 工程量大、非单轮可闭环，维持后续；P4「CI `upload-artifact@v5` Node 20 告警」经核对两 job 仍 success，属评估项，改动 CI 有破坏已打通构建的风险，本轮不改、维持现状。P5「todo 无 assignee」非仓库文件、成员仅所有者一人，维持现状。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/FoldingModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把 VSCode 最基础的「代码折叠/展开」落地为独立内核。① `regionsOf` 扫描文档识别可折叠区间——花括号配对为主（Kotlin/Java/C/C++/JS 通用，跳过字符串、字符字面量与 `//`、`/* */` 注释，未闭合字面量在换行处容错恢复），缩进块（Python 行尾 `:` 且后续更深缩进）为辅，同一起始行保留覆盖更长者，按起始行升序、容量上限 512；② `fold` 保留区间首行、把 `[start+1, end]` 折为一行占位符 `⋯ (N lines)`，返回新文本并按 path+起始行记快照；③ `unfold` 仅当当前文本与折叠态快照完全一致才还原原文，用户折叠后又编辑则失败安全放弃、不覆盖内容；④ 快照按文件隔离、`isFolded` 供 UI 判定 ▸/▾、`invalidate`/`clear` 供外部清理；⑤ 空文本/越界行/非法配置失败安全幂等，零 Android/Compose/三方依赖，core 不依赖 feature 约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：行号栏每行左侧新增 14.dp 折叠标记区——已折叠行显示 ▸（点击展开），可折叠区间首行显示 ▾（点击折叠），仅占行号栏空白区、不拦截 `BasicTextField` 输入焦点。`foldAt`/`unfoldAt` 调用内核后经 `MainViewModel.updateContent` 回写，撤销树可整步回退，补全/minimap/查找高亮自动刷新；`foldTick` 随折叠/展开自增触发行号栏重组。折叠标记同时读取内核快照态与区间列表，折叠后区间因闭合行折入而消失时仍可由 ▸ 入口展开。查找替换/括号匹配/多光标/caret/选区/minimap 既有行为不变。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 追加 v0.3.21 折叠条目，标注为纯文本折叠（非 BasicTextField 视图级），LSP 语义级折叠属后续。
+- **验证**：`FoldingModel` 经 Kotlin 编译器真实编译并运行 **44 项单测全通过**（花括号简单/嵌套/混合、注释与字符串/字符字面量跳过、转义与未闭合容错、Python 缩进块与空行不打断、`regionAt`、fold/unfold 往返、自定义占位符、幂等、折叠后编辑失败安全、path 隔离、空输入/越界/非法配置、CRLF 保留、容量上限、`minFoldLines` 阈值、`invalidate`/`clear`）；`EditorArea.kt` 按词法排除注释/字符串后的括号平衡（花括号 207/207、圆括号 611/611）与新增符号引用静态核对通过；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级折叠、LSP（语义级折叠/配对/重命名/跳转）与 DAP、CI `upload-artifact` Node 版本告警评估、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。
+
 ## v0.3.20 — 括号匹配高亮与跳转：core:editor 配对内核 + 编辑器光标接线
 
 > 响应 2026-11-24 12:10 巡检日报 P3「编辑器增强余项」。在线核对：main HEAD `50101b35`（源码 `a818b3be`，RELEASE v0.3.19），`Build suicoco`（run 45325016178）与 `build-plugins`（run 45325016222）双 job success，tags/Release 仍为里程碑 v0.3.4。日报 P1「查找替换」已由 v0.3.19 落地，按幂等原则跳过；P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P4「阶段4/5/6 todo 无 assignee」成员仅所有者一人，非仓库文件，维持现状。P3 中 BasicTextField 原生多段选区与 LSP/DAP 工程量大、非单轮可闭环，故从同一「编辑器增强余项」中挑出可离线/CI 安全、未重复的 VSCode 基础能力——括号匹配，沿用纯 Kotlin 内核 + 独立单测范式。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

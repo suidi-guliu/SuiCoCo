@@ -45,6 +45,7 @@ import com.suicoco.core.editor.CursorLayoutModel
 import com.suicoco.core.editor.FindModel
 import com.suicoco.core.editor.MinimapModel
 import com.suicoco.core.editor.MultiCursorModel
+import com.suicoco.core.editor.ReplaceModel
 import com.suicoco.core.editor.SelectionHighlightModel
 import com.suicoco.data.EditorTab
 import com.suicoco.viewmodel.MainViewModel
@@ -78,12 +79,24 @@ fun EditorArea(vm: MainViewModel) {
             FindModel.Options(ignoreCase = findIgnoreCase, wholeWord = findWholeWord)
         )
     }
+    // 查找替换（v0.3.19）：复用 FindModel 的匹配结果，ReplaceModel 只负责纯文本替换，
+    // 结果经 vm.updateContent 回写，因此撤销树快照、补全刷新、minimap 重算自动同步。
+    val replaceModel = remember { ReplaceModel() }
+    var replaceOpen by remember { mutableStateOf(false) }
+    var replaceText by remember { mutableStateOf("") }
+    var replaceNotice by remember { mutableStateOf("") }
     // 查询或选项变化后把当前项重置到首个匹配（空查询为 -1），避免索引指向旧结果。
     LaunchedEffect(findQuery, findIgnoreCase, findWholeWord) {
         findIndex = if (findMatches.isEmpty()) -1 else 0
+        replaceNotice = ""
     }
     fun openFind() {
         findOpen = true
+        if (findMatches.isNotEmpty() && findIndex < 0) findIndex = 0
+    }
+    fun openReplace() {
+        findOpen = true
+        replaceOpen = true
         if (findMatches.isNotEmpty() && findIndex < 0) findIndex = 0
     }
     fun closeFind() { findOpen = false }
@@ -95,6 +108,21 @@ fun EditorArea(vm: MainViewModel) {
     fun findPrev() {
         if (findMatches.isEmpty()) return
         findIndex = findModel.previousIndex(findMatches, findIndex)
+        findTick++
+    }
+    fun replaceCurrent() {
+        val path = activePath ?: return
+        val match = findModel.matchAt(findMatches, findIndex) ?: return
+        vm.updateContent(path, replaceModel.replaceAt(activeContent, match.start, match.end, replaceText))
+        replaceNotice = "已替换 1 处"
+        findTick++
+    }
+    fun replaceAllMatches() {
+        val path = activePath ?: return
+        val result = replaceModel.replaceAll(activeContent, findMatches, replaceText)
+        replaceNotice = if (result.replaced == 0) "无可替换匹配" else "已替换 ${result.replaced} 处"
+        if (result.replaced == 0) return
+        vm.updateContent(path, result.text)
         findTick++
     }
 
@@ -143,6 +171,14 @@ fun EditorArea(vm: MainViewModel) {
                 onToggleWord = { findWholeWord = !findWholeWord },
                 onPrev = { findPrev() },
                 onNext = { findNext() },
+                onOpenReplace = { openReplace() },
+                replaceVisible = replaceOpen,
+                replacement = replaceText,
+                replaceNotice = replaceNotice,
+                onReplacementChange = { replaceText = it; replaceNotice = "" },
+                onToggleReplace = { replaceOpen = !replaceOpen },
+                onReplaceOne = { replaceCurrent() },
+                onReplaceAll = { replaceAllMatches() },
                 onClose = { closeFind() }
             )
         }
@@ -185,6 +221,7 @@ fun EditorArea(vm: MainViewModel) {
                     findTick = findTick,
                     findModel = findModel,
                     onOpenFind = { openFind() },
+                    onOpenReplace = { openReplace() },
                     onFindNext = { findNext() },
                     onFindPrev = { findPrev() },
                     onCloseFind = { closeFind() }
@@ -235,6 +272,7 @@ private fun CodeEditor(
     findTick: Int,
     findModel: FindModel,
     onOpenFind: () -> Unit,
+    onOpenReplace: () -> Unit,
     onFindNext: () -> Unit,
     onFindPrev: () -> Unit,
     onCloseFind: () -> Unit
@@ -325,6 +363,7 @@ private fun CodeEditor(
                         // 均为稳定 Key 常量；输入焦点在文本域或查找栏时均可触发（查找栏另挂同级处理）。
                         when {
                             e.isCtrlPressed && e.key == Key.F -> { onOpenFind(); true }
+                            e.isCtrlPressed && e.key == Key.H -> { onOpenReplace(); true }
                             e.key == Key.F3 -> { if (e.isShiftPressed) onFindPrev() else onFindNext(); true }
                             e.key == Key.Escape -> { onCloseFind(); true }
                             e.isCtrlPressed && e.key == Key.Z -> {
@@ -548,6 +587,14 @@ private fun FindBar(
     onToggleWord: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
+    onOpenReplace: () -> Unit,
+    replaceVisible: Boolean,
+    replacement: String,
+    replaceNotice: String,
+    onReplacementChange: (String) -> Unit,
+    onToggleReplace: () -> Unit,
+    onReplaceOne: () -> Unit,
+    onReplaceAll: () -> Unit,
     onClose: () -> Unit
 ) {
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
@@ -568,6 +615,7 @@ private fun FindBar(
                         when {
                             e.key == Key.Enter -> { onNext(); true }
                             e.key == Key.F3 -> { if (e.isShiftPressed) onPrev() else onNext(); true }
+                            e.isCtrlPressed && e.key == Key.H -> { onOpenReplace(); true }
                             e.key == Key.Escape -> { onClose(); true }
                             else -> false
                         }
@@ -598,8 +646,45 @@ private fun FindBar(
                 enabled = true,
                 onClick = onToggleWord
             )
+            Spacer(Modifier.width(8.dp))
+            ToolbarButton(
+                text = if (replaceVisible) "替换 ▾" else "替换 ▸",
+                enabled = true,
+                onClick = onToggleReplace
+            )
             Spacer(Modifier.weight(1f))
             ToolbarButton("关闭 Esc", enabled = true, onClick = onClose)
+        }
+        // 替换行（v0.3.19）：Ctrl+H 打开，Enter 替换当前、按钮「全部」批量替换；
+        // 替换串按字面量处理，替换结果经内核回写，撤销树可一次撤销整批替换。
+        if (replaceVisible) {
+            Spacer(Modifier.height(2.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("↻", fontSize = 12.sp, color = VscodeTheme.FgMuted)
+                Spacer(Modifier.width(8.dp))
+                BasicTextField(
+                    value = replacement,
+                    onValueChange = onReplacementChange,
+                    modifier = Modifier.weight(1f).background(VscodeTheme.InputBg).padding(6.dp)
+                        .onKeyEvent { e ->
+                            if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
+                            when {
+                                e.key == Key.Enter -> { onReplaceOne(); true }
+                                e.key == Key.Escape -> { onClose(); true }
+                                else -> false
+                            }
+                        },
+                    singleLine = true,
+                    textStyle = TextStyle(color = VscodeTheme.Fg, fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace)
+                )
+                Spacer(Modifier.width(8.dp))
+                ToolbarButton("替换", enabled = matchCount > 0, onClick = onReplaceOne)
+                Spacer(Modifier.width(4.dp))
+                ToolbarButton("全部", enabled = matchCount > 0, onClick = onReplaceAll)
+                Spacer(Modifier.width(8.dp))
+                Text(replaceNotice, color = VscodeTheme.FgDim, fontSize = 11.sp)
+            }
         }
     }
 }

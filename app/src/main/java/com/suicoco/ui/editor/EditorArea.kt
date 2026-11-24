@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.suicoco.core.design.VscodeTheme
 import com.suicoco.core.editor.BracketMatchModel
+import com.suicoco.core.editor.CommentModel
 import com.suicoco.core.editor.CursorLayoutModel
 import com.suicoco.core.editor.FindModel
 import com.suicoco.core.editor.FoldingModel
@@ -93,6 +94,10 @@ fun EditorArea(vm: MainViewModel) {
     // vm.updateContent 写回，撤销树自动同步。foldTick 在每次折叠/展开后自增，触发行号栏重组。
     val foldingModel = remember { FoldingModel() }
     var foldTick by remember { mutableStateOf(0) }
+    // 行注释切换（v0.3.22）：纯 Kotlin CommentModel 按文件类型推断行注释符号，
+    // 对光标行或选区涉及的多行统一加/去注释，结果经 vm.updateContent 写回，撤销树整步回退。
+    val commentModel = remember { CommentModel() }
+    var commentRequest by remember { mutableStateOf(0) } // 工具栏触发行注释切换的递增计数
     // 查询或选项变化后把当前项重置到首个匹配（空查询为 -1），避免索引指向旧结果。
     LaunchedEffect(findQuery, findIgnoreCase, findWholeWord) {
         findIndex = if (findMatches.isEmpty()) -1 else 0
@@ -155,6 +160,8 @@ fun EditorArea(vm: MainViewModel) {
             ToolbarButton("↶ 撤销", undoState.first) { vm.undo() }
             Spacer(Modifier.width(12.dp))
             ToolbarButton("↷ 重做", undoState.second) { vm.redo() }
+            Spacer(Modifier.width(16.dp))
+            ToolbarButton("// 注释", activePath != null) { commentRequest++ }
             Spacer(Modifier.width(16.dp))
             ToolbarButton(
                 text = if (multiMode) "⋮ 多光标 ON (${cursorModel.cursorCount()})" else "⋮ 多光标",
@@ -235,7 +242,9 @@ fun EditorArea(vm: MainViewModel) {
                     onCloseFind = { closeFind() },
                     foldingModel = foldingModel,
                     foldTick = foldTick,
-                    onFoldChanged = { foldTick++ }
+                    onFoldChanged = { foldTick++ },
+                    commentModel = commentModel,
+                    commentRequest = commentRequest
                 )
                 CompletionPopup(vm)
             } else {
@@ -289,7 +298,9 @@ private fun CodeEditor(
     onCloseFind: () -> Unit,
     foldingModel: FoldingModel,
     foldTick: Int,
-    onFoldChanged: () -> Unit
+    onFoldChanged: () -> Unit,
+    commentModel: CommentModel,
+    commentRequest: Int
 ) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
@@ -395,6 +406,27 @@ private fun CodeEditor(
         if (next != tab.content) { vm.updateContent(tab.path, next); onFoldChanged() }
     }
 
+    // 行注释切换（v0.3.22）：取当前选区（或光标）覆盖的首末行，按文件类型推断注释符号，
+    // 纯 Kotlin CommentModel 统一加/去注释；结果经 vm.updateContent 回写，撤销树整步回退，
+    // 新光标偏移随本行增删同步。工具栏按钮（commentRequest 递增）与 Ctrl+/ 共用此函数。
+    fun toggleComment() {
+        val text = tab.content
+        if (text.isEmpty()) return
+        val selStart = fieldValue.selection.start.coerceAtMost(text.length)
+        val selEnd = fieldValue.selection.end.coerceAtMost(text.length)
+        val startLine = commentModel.lineOfOffset(text, selStart)
+        val endLine = commentModel.lineOfOffset(text, selEnd)
+        val token = commentModel.tokenFor(tab.path)
+        val result = commentModel.toggle(text, startLine, endLine, token, selEnd)
+        if (result.text == text) return
+        vm.updateContent(tab.path, result.text)
+        fieldValue = fieldValue.copy(selection = TextRange(result.caret))
+    }
+    // 工具栏触发：仅在计数 > 0（即真实点击）时执行，跳过初始组合。
+    LaunchedEffect(commentRequest) {
+        if (commentRequest > 0) toggleComment()
+    }
+
     // F3 / Ctrl+F 跳转后滚动到当前匹配所在行：用 CursorLayoutModel 求匹配起点的行号，
     // 换算为像素后平滑滚动；findTick 变化才触发，输入过程（findIndex=0）也会定位首个匹配。
     LaunchedEffect(findTick, findIndex) {
@@ -427,6 +459,7 @@ private fun CodeEditor(
                         when {
                             e.isCtrlPressed && e.key == Key.F -> { onOpenFind(); true }
                             e.isCtrlPressed && e.key == Key.H -> { onOpenReplace(); true }
+                            e.isCtrlPressed && e.key == Key.Slash -> { toggleComment(); true }
                             e.key == Key.F3 -> { if (e.isShiftPressed) onFindPrev() else onFindNext(); true }
                             e.isCtrlPressed && e.isShiftPressed && e.key == Key.Backslash -> {
                                 jumpToMatchingBracket(); true

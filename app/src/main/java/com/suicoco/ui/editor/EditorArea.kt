@@ -37,10 +37,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.suicoco.core.design.VscodeTheme
+import com.suicoco.core.editor.BracketMatchModel
 import com.suicoco.core.editor.CursorLayoutModel
 import com.suicoco.core.editor.FindModel
 import com.suicoco.core.editor.MinimapModel
@@ -282,6 +285,19 @@ private fun CodeEditor(
     // 说明：BasicTextField 内部自行滚动且旧的 value/onValueChange 重载不暴露 scrollState，
     // 故跳转通过外层可滚动容器 + 行高像素换算实现，与键盘输入/撤销重做互不影响。
     val scrollState = rememberScrollState()
+    // 光标位置（v0.3.20）：BasicTextField 改用 TextFieldValue 重载以取得 selection.end，
+    // 供括号匹配内核定位。外部内容变化（撤销/重做/查找替换）在 LaunchedEffect 中同步回写，
+    // 夹紧选区，保持原有编辑语义不变。
+    var fieldValue by remember(tab.path) { mutableStateOf(TextFieldValue(tab.content)) }
+    LaunchedEffect(tab.content) {
+        if (fieldValue.text != tab.content) {
+            val max = tab.content.length
+            val s = fieldValue.selection.start.coerceAtMost(max)
+            val e = fieldValue.selection.end.coerceAtMost(max)
+            fieldValue = TextFieldValue(tab.content, TextRange(s, e))
+        }
+    }
+    val caretOffset = fieldValue.selection.end.coerceAtMost(tab.content.length)
     val density = LocalDensity.current
     val lineHeightPx = with(density) { VscodeTheme.LINE_HEIGHT.sp.toPx() }
     val sourceLineCount = tab.content.count { it == '\n' } + 1
@@ -335,6 +351,25 @@ private fun CodeEditor(
         ).firstOrNull()
     }
 
+    // 括号匹配（v0.3.20）：纯 Kotlin BracketMatchModel 在代码区跳过字符串/注释后按栈配对，
+    // 取光标左右相邻的括号，得到两个单字符区间，复用 SelectionHighlightModel 画高亮矩形。
+    // 仅视觉指示，不拦截输入；失配或字符串/注释中的符号不参与，失败安全。
+    val bracketModel = remember { BracketMatchModel() }
+    val bracketMatch = remember(tab.content, caretOffset) {
+        bracketModel.matchAt(tab.content, caretOffset)
+    }
+    val bracketRects = remember(tab.content, bracketMatch, charWidthPx, lineHeightPx) {
+        val bm = bracketMatch
+        if (bm == null) emptyList()
+        else selectionModel.highlightOf(
+            tab.content, listOf(bm.openRange, bm.closeRange), lineHeightPx, charWidthPx
+        )
+    }
+    fun jumpToMatchingBracket() {
+        val target = bracketModel.jumpToMatch(tab.content, caretOffset)
+        if (target != caretOffset) fieldValue = fieldValue.copy(selection = TextRange(target))
+    }
+
     // F3 / Ctrl+F 跳转后滚动到当前匹配所在行：用 CursorLayoutModel 求匹配起点的行号，
     // 换算为像素后平滑滚动；findTick 变化才触发，输入过程（findIndex=0）也会定位首个匹配。
     LaunchedEffect(findTick, findIndex) {
@@ -352,8 +387,11 @@ private fun CodeEditor(
                 .verticalScroll(scrollState)
         ) {
             BasicTextField(
-                value = tab.content,
-                onValueChange = { vm.updateContent(tab.path, it) },
+                value = fieldValue,
+                onValueChange = { next ->
+                    fieldValue = next
+                    vm.updateContent(tab.path, next.text)
+                },
                 // fillMaxWidth（非 fillMaxSize）：文本按内容高度铺开，滚动交给外层 verticalScroll，
                 // 这样 scrollState 才有真实 maxValue，minimap 的 animateScrollTo 才能定位目标行。
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 10.dp)
@@ -365,6 +403,9 @@ private fun CodeEditor(
                             e.isCtrlPressed && e.key == Key.F -> { onOpenFind(); true }
                             e.isCtrlPressed && e.key == Key.H -> { onOpenReplace(); true }
                             e.key == Key.F3 -> { if (e.isShiftPressed) onFindPrev() else onFindNext(); true }
+                            e.isCtrlPressed && e.isShiftPressed && e.key == Key.Backslash -> {
+                                jumpToMatchingBracket(); true
+                            }
                             e.key == Key.Escape -> { onCloseFind(); true }
                             e.isCtrlPressed && e.key == Key.Z -> {
                                 if (e.isShiftPressed) vm.redo() else vm.undo(); true
@@ -419,6 +460,20 @@ private fun CodeEditor(
                                     .width(with(density) { r.widthPx.toDp() })
                                     .height(VscodeTheme.LINE_HEIGHT.dp)
                                     .background(VscodeTheme.Accent.copy(alpha = 0.45f))
+                            )
+                        }
+                        // 括号匹配高亮层（v0.3.20）：光标左右相邻括号与其配对项各画一个亮黄块。
+                        // 与查找高亮同口径（SelectionHighlightModel 拆矩形），无 clickable/pointerInput。
+                        bracketRects.forEach { r ->
+                            Box(
+                                modifier = Modifier
+                                    .offset(
+                                        x = with(density) { (textStartPx + r.xPx).toDp() },
+                                        y = with(density) { (textTopPx + r.yPx).toDp() }
+                                    )
+                                    .width(with(density) { r.widthPx.toDp() })
+                                    .height(VscodeTheme.LINE_HEIGHT.dp)
+                                    .background(VscodeTheme.Yellow.copy(alpha = 0.65f))
                             )
                         }
                         // 多段选区高亮层（v0.3.17）：逐行半透明矩形，坐标口径与文本 padding 对齐。

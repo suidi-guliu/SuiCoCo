@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.19 — 文件内查找替换（Find & Replace）：core:editor 替换内核 + 编辑器替换行接线
+
+> 响应 2026-11-24 06:01 巡检日报 P3「编辑器增强余项」中**可离线/CI 安全、未重复的查找替换闭环**——v0.3.18 已落地 P1 的「找得到、跳得动」，但查找栏只能跳转不能改写；本轮补齐 VSCode 最核心的后续动作「替换当前 / 全部替换」，延续纯 Kotlin 内核 + 独立单测范式，不触碰 BasicTextField 原生多选区与 LSP/DAP 等超出单轮范围的余项。在线核对：HEAD `81efff1`（源码 `4d37066`，v0.3.18），RELEASE 记至 v0.3.18，最终双 job success；`core/editor` 仅有 FindModel 无 ReplaceModel，查找栏无替换控件，确未落地。日报 P2（真实 arm64 `libproot.so` 随包，需 NDK27 交叉编译 + arm64 真机）与 P4（阶段4/5/6 todo 无 assignee，成员仅所有者一人）经核对维持阻塞/现状，不重复；P3 中 LSP/DAP 与 BasicTextField 原生多段选区工程量大，非单轮可闭环。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/ReplaceModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把查找结果的改写落地为独立内核。① `replaceAt(text, start, end, replacement)` 替换单个半开区间（UTF-16 code unit 口径），start/end 夹紧、start > end 自动交换、空替换串等价于删除；② `replaceAll(text, matches, replacement)` 对 `FindModel.Match` 列表一次遍历批量替换，先按起点排序、夹紧、丢弃零宽与相互重叠项（保留先出现者），返回 `Result(text, replaced)`，从根本上避免逐项修改导致的偏移漂移；③ 替换串按**字面量**处理，不做正则/`$` 分组/转义解释，不引入命令或 shell 面；④ `caretAfterReplace` 给出替换后的光标位置；⑤ 全部公开方法失败安全（空文本/空列表/非法区间幂等返回原文本与 0）、纯函数无隐藏状态，零 Android/Compose/三方依赖，core 不依赖 feature 的架构约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：查找栏新增 `Ctrl+H` 展开/聚焦替换行——查找输入框按 Ctrl+H 也可展开；替换输入 Enter 或「替换」按钮替换当前匹配，「全部」按钮一次性替换全部匹配，显示「已替换 N 处 / 无可替换匹配」，Esc 关闭整栏；`Aa`/`ab|` 与 ↑↓/F3 选项继续参与匹配计算。内核结果经 `MainViewModel.updateContent` 回写，撤销树快照、补全刷新、minimap 重算与查找高亮自动同步，「全部替换」可被一次撤销整体回退；仅用 `BasicTextField`/`Row`/`ToolbarButton`/稳定 Key 常量（`Key.H`），无实验性 API。补全、撤销/重做、多光标、caret/选区叠加、minimap 原行为不变。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 追加 v0.3.19 查找替换条目，标注 LSP 级语义重命名仍属后续。
+- **验证**：`ReplaceModel` 连同 `FindModel` 经 Kotlin 2.2.20（`kotlin-compiler-embeddable`）真实编译并运行 **39 项单测全通过**（单区间替换/前后缀/整体/删除/中文与字面量 `$`、空文本/负与超界/反向区间等失败安全；全部替换的单/多/相邻/扩展/空替换串/换行与 CRLF/中文、乱序、重叠去重、越界夹紧、反向匹配、空列表与空文本幂等、与 FindModel 忽略大小写端到端串联、替换后光标位置）；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过；`EditorArea.kt` 按词法排除注释/字符串后的括号平衡（花括号 185/185、圆括号 550/550、方括号 9/9）与新增符号引用/调用点静态核对通过。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区、LSP（语义级重命名/跳转）与 DAP、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。
+
 ## v0.3.18 — 文件内查找（Find-in-file）：core:editor 匹配内核 + 编辑器查找栏接线
 
 > 响应 2026-11-24 06:01 巡检日报 P1（编辑器文件内查找内核 + UI 接线）。在线核对：HEAD `86a5366`（源码 `b260a88`，v0.3.17），RELEASE 记至 v0.3.17，双 job success；`core/editor` 无 FindModel、RELEASE 查找关键词 0 命中，P1 确未落地。日报 P2（真实 arm64 `libproot.so` 随包，需 NDK27 交叉编译 + arm64 真机）与 P4（阶段4/5/6 todo 无 assignee，成员仅所有者一人）经核对维持阻塞/现状，无 SDK/NDK/真机不可完成、非仓库文件，不重复；P3（BasicTextField 原生多段选区、LSP/DAP）工程量大，v0.3.17 已落地选区高亮视觉，LSP/DAP 非单轮可闭环。故本轮落地 P1，沿用纯 Kotlin 内核 + 独立单测范式，保持三条不变量（无 host root / 官方源 / 仅 arm64）。

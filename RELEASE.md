@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.25 — 跳转到指定行（Go to Line）：core:editor 行号内核 + 编辑器 Ctrl+G 输入栏接线
+
+> 响应 2026-11-25 18:08 巡检日报（18:00 轮次）P1「Ctrl+G 跳转到指定行」。在线核对：main HEAD `e3b41d9`（源码 `0f28abba`，RELEASE **v0.3.24**），日报发布后主代理已把 12:00 轮次 P3 的自动缩进以 5 个提交（18:09–18:10）推送上线、`GoToLineModel.kt` 在线不存在，确认 P1 未重复且 v0.3.24 已完成，按幂等原则跳过。P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3「BasicTextField 原生多段选区 / LSP+DAP」工程量大、非单轮可闭环，维持后续；P4「CI `upload-artifact@v5` Node 20 告警」双 job 仍 success，升级有破坏已打通构建风险，留专门窗口评估；P5「todo 无 assignee」非仓库文件、成员仅所有者一人，维持现状。本轮按 P1 落地跳转行并递增小版本为 **v0.3.25**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/GoToLineModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把 VSCode 最高频的导航能力「按行号/行:列跳转」收敛为独立内核。① `parse` 解析 `行` 或 `行[:列]`（分隔符 `:` / `,`，列省略取第 1 列），两端空白忽略，1-based 正整数，多分隔符/非数字/0/负数/超长一律失败返回 null；② 1-based → 0-based，`resolve` 按文档行数把行号夹到末行、列夹到该行行尾，并用 `clamped` 标记供 UI 提示；③ CRLF / LF / 孤立 CR 均算一次换行，offset 停在 CRLF 中间仍属上一行行尾；④ 偏移与列均按 UTF-16 code unit 计，与 `CursorLayoutModel` 口径一致；⑤ 空文本、越界行/列、非法输入全部失败安全幂等，无隐藏状态，零 Android/Compose/三方依赖，core 不依赖 feature 约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：编辑器 `onKeyEvent` 拦截 Ctrl+G 打开跳转行输入栏（复用 `FindBar` 同款 `WidgetBg`/`InputBg` 样式与 `FocusRequester`，回车确认、Esc 关闭），工具栏新增「:# 转到行」按钮以便平板无物理键盘时点按；输入经内核解析后仅产出光标偏移，复用 `CursorLayoutModel.lineColumnOf` 反算行号并走查找/大纲同款 `animateScrollTo` 滚动锚点，光标经 `TextFieldValue.selection` 移动——**不改动文本内容**，撤销树/补全/minimap/查找高亮/大纲/自动缩进既有行为全部不变；非法输入只显示提示、不改文档。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 追加 v0.3.25 跳转行条目，标注为纯内核定位（非 LSP 语义跳转）。
+- **验证**：`GoToLineModel` 与 `CursorLayoutModel` 经 Kotlin 2.2.20 编译器真实编译并运行 **71 项单测全通过**（parse 合法/非法输入、CRLF/LF/CR 行数、偏移与行尾夹紧、resolve 标志与幂等、8 组与 `CursorLayoutModel.lineColumnOf` 的交叉验证）；`EditorArea.kt` 按词法排除注释/字符串后花括号 272/272、圆括号 784/784、方括号 1/1 平衡，`CodeEditor` 调用参数与签名（含 `onOpenGoToLine`/`gotoOffset`/`gotoTick`）一致性静态核对通过；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP（语义级大纲/折叠/配对/重命名/跳转/注释/格式化）与 DAP、CI `upload-artifact` Node 版本告警评估、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。
+
 ## v0.3.24 — 自动缩进（Auto Indent）：core:editor 缩进内核 + 编辑器 Enter/Tab/Shift+Tab 接线
 
 > 响应 2026-11-25 12:05 巡检日报（12:00 轮次）P3「编辑器增强余项」。在线核对：main HEAD `125b244`（源码 `846ee14`，RELEASE v0.3.23），`SymbolOutlineModel.kt` 已在线存在、P1「代码大纲」已由 v0.3.23 落地，按幂等原则跳过；P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P4「CI `upload-artifact@v5` Node 20 告警」两 job 仍 success，升级有破坏已打通构建的风险，留专门窗口评估；P5「todo 无 assignee」非仓库文件、成员仅所有者一人，维持现状。沿用前几轮「从编辑器增强余项挑一个可离线/CI 安全、未重复的 VSCode 基础能力」范式，本轮落地自动缩进并递增小版本为 v0.3.24。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

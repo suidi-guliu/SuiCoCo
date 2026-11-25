@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.24 — 自动缩进（Auto Indent）：core:editor 缩进内核 + 编辑器 Enter/Tab/Shift+Tab 接线
+
+> 响应 2026-11-25 12:05 巡检日报（12:00 轮次）P3「编辑器增强余项」。在线核对：main HEAD `125b244`（源码 `846ee14`，RELEASE v0.3.23），`SymbolOutlineModel.kt` 已在线存在、P1「代码大纲」已由 v0.3.23 落地，按幂等原则跳过；P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P4「CI `upload-artifact@v5` Node 20 告警」两 job 仍 success，升级有破坏已打通构建的风险，留专门窗口评估；P5「todo 无 assignee」非仓库文件、成员仅所有者一人，维持现状。沿用前几轮「从编辑器增强余项挑一个可离线/CI 安全、未重复的 VSCode 基础能力」范式，本轮落地自动缩进并递增小版本为 v0.3.24。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/AutoIndentModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把 VSCode 最高频的编辑行为「回车延续缩进 / Tab 缩进 / Shift+Tab 反缩进」落地为独立内核。① 词法级跳过双引号/单引号/反引号字面量与行尾 `//`、`#` 注释（`#` 仅在行首或前有空白时视作注释），避免字符串里的 `{` / `//` 触发误缩进；② 回车时上一行代码以 `{` `[` `(` `->` `=>` 或 `:` 结尾则加一级缩进，光标右侧紧跟 `}` `]` `)` 则退一级，`{|}` 场景拆成「新行+一级缩进」与「闭合行+原缩进」两段并把光标停在前者；③ Tab 在行首空白处对齐下一制表位（tab 行插 tab），代码后插入一级缩进，Shift+Tab 删除当前行一级前导缩进；④ 完整保留 tab/空格风格与 CRLF/LF/CR 换行符（CRLF 只算一次换行），缩进列数上限 64；⑤ `lineOfOffset`/`lineStartOf`/`indentOf`/`newlineOf` 辅助 API，空文本、越界偏移、非法 unit/tabWidth/上限均失败安全幂等，零 Android/Compose/三方依赖，core 不依赖 feature 约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：`BasicTextField` 的 `onKeyEvent` 拦截 Enter / Tab / Shift+Tab（Ctrl 组合与非折叠选区交还默认行为），调用内核算出新文本与新光标后写回 `fieldValue` 并经 `vm.updateContent` 持久化——撤销树可整步回退，补全/minimap/查找高亮/大纲自动刷新；只在内核确实改变文本时消费按键，失败场景不拦截输入。折叠/注释/大纲/查找替换/括号匹配/多光标/caret/选区/minimap 既有行为不变。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 追加 v0.3.24 自动缩进条目，标注为纯词法级启发式（非 LSP 格式化/语言专属缩进规则）。
+- **验证**：`AutoIndentModel` 经 Kotlin 2.2.20 编译器真实编译并运行 **71 项单测全通过**（多语言开括号/冒号/箭头、字符串与注释遮蔽、`{|}` 双行与闭合括号反缩进、CRLF/LF/CR、tab/空格混合、Tab 制表位对齐与 Shift+Tab 反缩进、容量上限、非法配置与越界失败安全、辅助 API）；`EditorArea.kt` 按词法排除注释/字符串后花括号 242/242、圆括号 709/709、方括号 1/1 平衡，新增符号引用与 `CodeEditor` 调用参数/签名一致性静态核对通过；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP（语义级大纲/折叠/配对/重命名/跳转/注释/格式化）与 DAP、CI `upload-artifact` Node 版本告警评估、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。
+
 ## v0.3.23 — 代码大纲（Symbol Outline）：core:editor 符号内核 + 编辑器大纲面板/点击定位接线
 
 > 响应 2026-11-25 06:06 巡检日报（05:59 轮次）P1「代码大纲（Symbol Outline）内核 + 编辑器大纲入口」。在线核对：main HEAD `6526ac0`（产物提交）/ 源码 `5e856ba`，RELEASE v0.3.22，`SymbolOutlineModel.kt` 在线不存在（404）、`CommentModel.kt` 在线存在（v0.3.22 已落地），确认大纲为未重复项，故按日报 P1 落地并将小版本递增为 v0.3.23（v0.3.22 已由上一轮行注释切换占用）。日报 P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3「BasicTextField 原生多段选区 / LSP+DAP」工程量大、非单轮可闭环，维持后续；P4「CI `upload-artifact@v5` Node 20 告警」双 job 仍 success、改动有破坏已打通构建风险，本轮不改；P5「todo 无 assignee」非仓库文件、成员仅所有者一人，维持现状。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

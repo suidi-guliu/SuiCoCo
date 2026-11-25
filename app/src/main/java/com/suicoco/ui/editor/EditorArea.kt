@@ -28,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
@@ -50,6 +51,7 @@ import com.suicoco.core.editor.CursorLayoutModel
 import com.suicoco.core.editor.FindModel
 import com.suicoco.core.editor.FoldingModel
 import com.suicoco.core.editor.GoToLineModel
+import com.suicoco.core.editor.LineOperationsModel
 import com.suicoco.core.editor.MinimapModel
 import com.suicoco.core.editor.MultiCursorModel
 import com.suicoco.core.editor.ReplaceModel
@@ -120,6 +122,13 @@ fun EditorArea(vm: MainViewModel) {
     var gotoOffset by remember { mutableStateOf(-1) }
     var gotoTick by remember { mutableStateOf(0) } // 递增触发 CodeEditor 定位
     val gotoFocus = remember { FocusRequester() }
+    // 行操作（v0.3.26）：纯 Kotlin LineOperationsModel 负责移动/复制/删除行，
+    // 结果经 vm.updateContent 回写，撤销树整步回退、补全/minimap/查找高亮自动同步。
+    // 工具栏按钮通过 request 递增 + kind 传入 CodeEditor，与快捷键共用同一执行函数。
+    val lineOpsModel = remember { LineOperationsModel() }
+    var lineOpRequest by remember { mutableStateOf(0) }
+    var lineOpKind by remember { mutableStateOf(LineOperationsModel.MOVE_UP) }
+    fun requestLineOp(kind: Int) { lineOpKind = kind; lineOpRequest++ }
     fun openGoToLine() {
         gotoOpen = true
         gotoQuery = ""
@@ -222,7 +231,13 @@ fun EditorArea(vm: MainViewModel) {
             ) {
                 if (gotoOpen) closeGoToLine() else openGoToLine()
             }
-            Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(12.dp))
+            // 行操作（v0.3.26）：平板无物理键盘时点按执行，与 Alt+↑/↓、Ctrl+D、Ctrl+Shift+K 同效。
+            ToolbarButton("↑ 行", activePath != null) { requestLineOp(LineOperationsModel.MOVE_UP) }
+            ToolbarButton("↓ 行", activePath != null) { requestLineOp(LineOperationsModel.MOVE_DOWN) }
+            ToolbarButton("⧉ 复制", activePath != null) { requestLineOp(LineOperationsModel.DUPLICATE) }
+            ToolbarButton("✕ 删行", activePath != null) { requestLineOp(LineOperationsModel.DELETE) }
+            Spacer(Modifier.width(12.dp))
             ToolbarButton(
                 text = if (multiMode) "⋮ 多光标 ON (${cursorModel.cursorCount()})" else "⋮ 多光标",
                 enabled = true
@@ -321,7 +336,10 @@ fun EditorArea(vm: MainViewModel) {
                     outlineJumpLine = outlineJumpLine,
                     outlineJumpTick = outlineJumpTick,
                     gotoOffset = gotoOffset,
-                    gotoTick = gotoTick
+                    gotoTick = gotoTick,
+                    lineOpsModel = lineOpsModel,
+                    lineOpRequest = lineOpRequest,
+                    lineOpKind = lineOpKind
                 )
                 CompletionPopup(vm)
                 // 代码大纲面板（v0.3.23）：右侧固定宽度列，列出当前文件声明符号；
@@ -392,7 +410,10 @@ private fun CodeEditor(
     outlineJumpLine: Int,
     outlineJumpTick: Int,
     gotoOffset: Int,
-    gotoTick: Int
+    gotoTick: Int,
+    lineOpsModel: LineOperationsModel,
+    lineOpRequest: Int,
+    lineOpKind: Int
 ) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
@@ -519,6 +540,33 @@ private fun CodeEditor(
         if (commentRequest > 0) toggleComment()
     }
 
+    // 行操作（v0.3.26）：取当前选区（或光标）覆盖的首末行，调用纯 Kotlin 内核移动/复制/删除，
+    // 结果经 vm.updateContent 回写——撤销树可整步回退，补全/minimap/查找高亮自动刷新。
+    // 工具栏按钮（request 递增）与 Alt+↑/↓、Ctrl+D、Ctrl+Shift+K 共用此函数。
+    fun applyLineOp(kind: Int) {
+        val text = tab.content
+        if (text.isEmpty()) return
+        val selStart = fieldValue.selection.start.coerceAtMost(text.length)
+        val selEnd = fieldValue.selection.end.coerceAtMost(text.length)
+        val startLine = lineOpsModel.lineOfOffset(text, selStart)
+        val endLine = lineOpsModel.lineOfOffset(text, selEnd)
+        val result = when (kind) {
+            LineOperationsModel.MOVE_UP -> lineOpsModel.moveUp(text, startLine, endLine, selEnd)
+            LineOperationsModel.MOVE_DOWN -> lineOpsModel.moveDown(text, startLine, endLine, selEnd)
+            LineOperationsModel.DUPLICATE -> lineOpsModel.duplicate(text, startLine, endLine, selEnd)
+            LineOperationsModel.DELETE -> lineOpsModel.delete(text, startLine, endLine, selEnd)
+            else -> null
+        } ?: return
+        if (result.text == text) return
+        vm.updateContent(tab.path, result.text)
+        fieldValue = fieldValue.copy(
+            selection = TextRange(result.caret.coerceAtMost(result.text.length))
+        )
+    }
+    LaunchedEffect(lineOpRequest) {
+        if (lineOpRequest > 0) applyLineOp(lineOpKind)
+    }
+
     // F3 / Ctrl+F 跳转后滚动到当前匹配所在行：用 CursorLayoutModel 求匹配起点的行号，
     // 换算为像素后平滑滚动；findTick 变化才触发，输入过程（findIndex=0）也会定位首个匹配。
     LaunchedEffect(findTick, findIndex) {
@@ -584,6 +632,21 @@ private fun CodeEditor(
                             e.isCtrlPressed && e.key == Key.H -> { onOpenReplace(); true }
                             e.isCtrlPressed && e.key == Key.G -> { onOpenGoToLine(); true }
                             e.isCtrlPressed && e.key == Key.Slash -> { toggleComment(); true }
+                            // 行操作（v0.3.26）：Alt+↑/↓ 上下移动整行，Ctrl+D 复制行，Ctrl+Shift+K 删除行。
+                            e.isAltPressed &&
+                                (e.key == Key.DirectionUp || e.key == Key.DirectionDown) -> {
+                                applyLineOp(
+                                    if (e.key == Key.DirectionUp) LineOperationsModel.MOVE_UP
+                                    else LineOperationsModel.MOVE_DOWN
+                                )
+                                true
+                            }
+                            e.isCtrlPressed && !e.isShiftPressed && e.key == Key.D -> {
+                                applyLineOp(LineOperationsModel.DUPLICATE); true
+                            }
+                            e.isCtrlPressed && e.isShiftPressed && e.key == Key.K -> {
+                                applyLineOp(LineOperationsModel.DELETE); true
+                            }
                             // 自动缩进（v0.3.24）：回车延续/增加一级缩进，Tab/Shift+Tab 缩进与反缩进。
                             // 仅在内核确实改变文本时消费按键，其它场景交还 BasicTextField 默认行为。
                             e.key == Key.Enter && !e.isCtrlPressed && !e.isShiftPressed -> {

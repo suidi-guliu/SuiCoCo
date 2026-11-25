@@ -52,6 +52,7 @@ import com.suicoco.core.editor.MinimapModel
 import com.suicoco.core.editor.MultiCursorModel
 import com.suicoco.core.editor.ReplaceModel
 import com.suicoco.core.editor.SelectionHighlightModel
+import com.suicoco.core.editor.SymbolOutlineModel
 import com.suicoco.data.EditorTab
 import com.suicoco.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
@@ -98,6 +99,17 @@ fun EditorArea(vm: MainViewModel) {
     // 对光标行或选区涉及的多行统一加/去注释，结果经 vm.updateContent 写回，撤销树整步回退。
     val commentModel = remember { CommentModel() }
     var commentRequest by remember { mutableStateOf(0) } // 工具栏触发行注释切换的递增计数
+    // 代码大纲（v0.3.23）：纯 Kotlin SymbolOutlineModel 词法扫描声明符号，面板与跳转共享。
+    // 由 activeContent 派生，切换文件/编辑内容自动重算；outlineJumpTick 触发 CodeEditor 滚动定位。
+    val outlineModel = remember { SymbolOutlineModel() }
+    var outlineOpen by remember { mutableStateOf(false) }
+    var outlineJumpLine by remember { mutableStateOf(-1) }
+    var outlineJumpTick by remember { mutableStateOf(0) }
+    val outlineSymbols = remember(activeContent) { outlineModel.symbolsOf(activeContent) }
+    fun jumpToSymbol(line: Int) {
+        outlineJumpLine = line
+        outlineJumpTick++
+    }
     // 查询或选项变化后把当前项重置到首个匹配（空查询为 -1），避免索引指向旧结果。
     LaunchedEffect(findQuery, findIgnoreCase, findWholeWord) {
         findIndex = if (findMatches.isEmpty()) -1 else 0
@@ -162,6 +174,13 @@ fun EditorArea(vm: MainViewModel) {
             ToolbarButton("↷ 重做", undoState.second) { vm.redo() }
             Spacer(Modifier.width(16.dp))
             ToolbarButton("// 注释", activePath != null) { commentRequest++ }
+            Spacer(Modifier.width(16.dp))
+            ToolbarButton(
+                text = if (outlineOpen) "☰ 大纲 ON" else "☰ 大纲",
+                enabled = activePath != null
+            ) {
+                outlineOpen = !outlineOpen
+            }
             Spacer(Modifier.width(16.dp))
             ToolbarButton(
                 text = if (multiMode) "⋮ 多光标 ON (${cursorModel.cursorCount()})" else "⋮ 多光标",
@@ -244,9 +263,20 @@ fun EditorArea(vm: MainViewModel) {
                     foldTick = foldTick,
                     onFoldChanged = { foldTick++ },
                     commentModel = commentModel,
-                    commentRequest = commentRequest
+                    commentRequest = commentRequest,
+                    outlineJumpLine = outlineJumpLine,
+                    outlineJumpTick = outlineJumpTick
                 )
                 CompletionPopup(vm)
+                // 代码大纲面板（v0.3.23）：右侧固定宽度列，列出当前文件声明符号；
+                // 点击某符号复用光标行→像素滚动锚点，平滑定位到目标行，保持编辑语义不变。
+                if (outlineOpen) {
+                    OutlinePanel(
+                        symbols = outlineSymbols,
+                        onJump = { line -> jumpToSymbol(line) },
+                        onClose = { outlineOpen = false }
+                    )
+                }
             } else {
                 WelcomeScreen(vm)
             }
@@ -300,7 +330,9 @@ private fun CodeEditor(
     foldTick: Int,
     onFoldChanged: () -> Unit,
     commentModel: CommentModel,
-    commentRequest: Int
+    commentRequest: Int,
+    outlineJumpLine: Int,
+    outlineJumpTick: Int
 ) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
@@ -434,6 +466,24 @@ private fun CodeEditor(
         if (match != null && lineHeightPx > 0f) {
             val line = caretLayout.lineColumnOf(tab.content, match.start).line
             scrollState.animateScrollTo((line * lineHeightPx).toInt().coerceAtLeast(0))
+        }
+    }
+
+    // 代码大纲跳转（v0.3.23）：点击符号经 outlineJumpLine/Tick 传入目标行，平滑滚动到该行居中。
+    // 与查找跳转同口径（行号→像素→animateScrollTo），并把光标移到目标行首，保持编辑语义不变。
+    LaunchedEffect(outlineJumpTick) {
+        if (outlineJumpTick > 0 && outlineJumpLine >= 0 && lineHeightPx > 0f) {
+            val safeLine = outlineJumpLine.coerceAtMost(sourceLineCount - 1)
+            scrollState.animateScrollTo((safeLine * lineHeightPx).toInt().coerceAtLeast(0))
+            // 光标落在目标行首，便于紧接着键盘编辑；偏移夹紧避免越界。
+            var off = 0
+            var n = 0
+            val text = tab.content
+            while (n < safeLine && off < text.length) {
+                if (text[off] == '\n') n++
+                off++
+            }
+            fieldValue = fieldValue.copy(selection = TextRange(off.coerceAtMost(text.length)))
         }
     }
 
@@ -943,6 +993,67 @@ private fun MultiCursorBar(
             ToolbarButton("退格") { applyEdit(model.deleteBeforeAll(content, 1)) }
             Spacer(Modifier.width(8.dp))
             ToolbarButton("删除") { applyEdit(model.deleteAfterAll(content, 1)) }
+        }
+    }
+}
+
+/**
+ * 代码大纲面板（v0.3.23）：右侧固定宽度列，列出 [symbols] 的「图标 + 名称 + 行号」。
+ * 符号种类用不同颜色图标区分（类/接口/枚举/结构体/函数/方法/变量/命名空间），
+ * 点击某行经 [onJump] 把目标行交给 CodeEditor 的滚动锚点定位；纯 UI，不改编辑语义。
+ */
+@Composable
+private fun OutlinePanel(
+    symbols: List<SymbolOutlineModel.Symbol>,
+    onJump: (Int) -> Unit,
+    onClose: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxHeight().width(160.dp)
+            .background(VscodeTheme.SideBarBg)
+            .padding(start = 6.dp, end = 4.dp, top = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("☰ 大纲 (${symbols.size})", color = VscodeTheme.FgMuted, fontSize = 11.sp,
+                modifier = Modifier.weight(1f))
+            Text("✕", color = VscodeTheme.FgDim, fontSize = 12.sp,
+                modifier = Modifier.clickable { onClose() })
+        }
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            if (symbols.isEmpty()) {
+                Text("无符号", color = VscodeTheme.FgDim, fontSize = 11.sp,
+                    modifier = Modifier.padding(4.dp))
+            } else {
+                symbols.forEach { sym ->
+                    val (icon, tint) = when (sym.kind) {
+                        SymbolOutlineModel.Kind.CLASS -> "C" to VscodeTheme.Blue
+                        SymbolOutlineModel.Kind.INTERFACE -> "I" to VscodeTheme.Blue
+                        SymbolOutlineModel.Kind.OBJECT -> "O" to VscodeTheme.Green
+                        SymbolOutlineModel.Kind.ENUM -> "E" to VscodeTheme.Yellow
+                        SymbolOutlineModel.Kind.STRUCT -> "S" to VscodeTheme.Blue
+                        SymbolOutlineModel.Kind.FUNCTION -> "ƒ" to VscodeTheme.Purple
+                        SymbolOutlineModel.Kind.METHOD -> "m" to VscodeTheme.Purple
+                        SymbolOutlineModel.Kind.VARIABLE -> "v" to VscodeTheme.Orange
+                        SymbolOutlineModel.Kind.NAMESPACE -> "N" to VscodeTheme.FgMuted
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(start = (sym.indent.coerceAtMost(8) * 2).dp, top = 2.dp, bottom = 2.dp)
+                            .clickable { onJump(sym.line) },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(icon, color = tint, fontSize = 11.sp)
+                        Spacer(Modifier.width(6.dp))
+                        Text(sym.name, color = VscodeTheme.Fg, fontSize = 12.sp,
+                            maxLines = 1, modifier = Modifier.weight(1f))
+                        Spacer(Modifier.width(4.dp))
+                        Text("${sym.line + 1}", color = VscodeTheme.FgDim, fontSize = 10.sp)
+                    }
+                }
+            }
         }
     }
 }

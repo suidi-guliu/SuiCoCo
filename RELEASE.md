@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.23 — 代码大纲（Symbol Outline）：core:editor 符号内核 + 编辑器大纲面板/点击定位接线
+
+> 响应 2026-11-25 06:06 巡检日报（05:59 轮次）P1「代码大纲（Symbol Outline）内核 + 编辑器大纲入口」。在线核对：main HEAD `6526ac0`（产物提交）/ 源码 `5e856ba`，RELEASE v0.3.22，`SymbolOutlineModel.kt` 在线不存在（404）、`CommentModel.kt` 在线存在（v0.3.22 已落地），确认大纲为未重复项，故按日报 P1 落地并将小版本递增为 v0.3.23（v0.3.22 已由上一轮行注释切换占用）。日报 P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3「BasicTextField 原生多段选区 / LSP+DAP」工程量大、非单轮可闭环，维持后续；P4「CI `upload-artifact@v5` Node 20 告警」双 job 仍 success、改动有破坏已打通构建风险，本轮不改；P5「todo 无 assignee」非仓库文件、成员仅所有者一人，维持现状。保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/SymbolOutlineModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把 VSCode 侧栏最高频的「代码大纲 / 符号导航」落地为独立内核。① 词法扫描跳过字符串/字符字面量与 `//`、`/* */` 注释，只识别代码区声明，注释/字符串里的 `class`、`fun` 等词不被误报；② 识别 Kotlin/Java/C/JS 的 `class`/`interface`/`object`/`enum`/`struct`/`record`、Kotlin `fun`、Python `def`/`async def`、`function`/`func`、Go `func`（含 `(s *S) Method` 接收者方法）与 `type X struct/interface`、C#/Kotlin `namespace`、JS `const`/`let`/`var` 箭头函数，输出符号名/种类/行号/符号名偏移/缩进层级；③ 关键字前只允许修饰词与 `@注解`，避免 `Foo::class.java` 之类表达式误报；④ 容量上限 512（可配），空文本/越界/非法配置失败安全幂等；⑤ `symbolAt`/`ofKind` 辅助 API，零 Android/Compose/三方依赖，core 不依赖 feature 约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：编辑工具栏新增「☰ 大纲」开关按钮（有活动文件时可用），开启后编辑器主体右侧显示固定宽度大纲面板，按种类着色图标（类/接口/结构体蓝、对象绿、枚举黄、函数/方法紫、变量橙、命名空间灰）+ 符号名 + 行号，缩进体现层级；符号列表由 `activeContent` 派生，切文件/编辑自动重算。点击某符号经 `outlineJumpLine`/`outlineJumpTick` 传入 `CodeEditor`，复用查找跳转同款滚动锚点（目标行号→像素→`animateScrollTo`）+ 把光标移到目标行首，保持撤销/补全/查找/替换/折叠/注释/括号匹配/多光标/minimap 既有行为不变。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 追加 v0.3.23 代码大纲条目，标注为纯词法级符号扫描（非 LSP 语义大纲），语义大纲/符号重命名属后续。
+- **验证**：`SymbolOutlineModel` 经 Kotlin 编译器（kotlinc 2.2.20）真实编译并运行 **45 项单测全通过**（Kotlin/Python/C++/Go/JS 多语言声明、注释与字符串遮蔽、`data`/`sealed`/`companion` 修饰词、泛型 `fun <T>`、Go 方法接收者、箭头函数变量、普通表达式不误报、符号名 offset 与缩进、CRLF、容量上限与非法配置回退、`symbolAt`/`ofKind` 辅助 API）；`EditorArea.kt` 按词法排除注释/字符串后花括号 237/237、圆括号 698/698、方括号 1/1 平衡，新增符号引用与 `CodeEditor` 调用参数/签名一致性静态核对通过；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP（语义级大纲/折叠/配对/重命名/跳转/注释）与 DAP、CI `upload-artifact` Node 版本告警评估、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。
+
 ## v0.3.22 — 行注释切换（Toggle Line Comment）：core:editor 注释内核 + 编辑器工具栏/Ctrl+/ 接线
 
 > 响应 2026-11-25 00:06 巡检日报（11-24 23:59 轮次）P3「编辑器增强余项」。在线核对：main HEAD `e3a7ccf`（产物提交）/ 源码 `3aa70f6`，RELEASE v0.3.21，`Build suicoco` 与 `build-plugins` 双 job success，tags/Release 仍为里程碑 v0.3.4。日报 P1「代码折叠」已由 v0.3.21 落地，按幂等原则跳过；P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P4「CI `upload-artifact@v5` Node 20 告警」经核对两 job 仍 success，属评估项、改动 CI 有破坏已打通构建的风险，本轮不改；P5「todo 无 assignee」非仓库文件、成员仅所有者一人，维持现状。沿用前几轮「从编辑器增强余项挑一个可离线/CI 安全、未重复的 VSCode 基础能力」范式，本轮从 P3 中挑出「行注释切换」落地。保持三条不变量（无 host root / 官方源 / 仅 arm64）。

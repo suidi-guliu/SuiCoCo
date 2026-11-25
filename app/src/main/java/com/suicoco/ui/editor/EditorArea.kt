@@ -43,6 +43,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.suicoco.core.design.VscodeTheme
+import com.suicoco.core.editor.AutoIndentModel
 import com.suicoco.core.editor.BracketMatchModel
 import com.suicoco.core.editor.CommentModel
 import com.suicoco.core.editor.CursorLayoutModel
@@ -106,6 +107,9 @@ fun EditorArea(vm: MainViewModel) {
     var outlineJumpLine by remember { mutableStateOf(-1) }
     var outlineJumpTick by remember { mutableStateOf(0) }
     val outlineSymbols = remember(activeContent) { outlineModel.symbolsOf(activeContent) }
+    // 自动缩进（v0.3.24）：纯 Kotlin AutoIndentModel 在回车/Tab/Shift+Tab 时计算新文本与光标，
+    // 经 vm.updateContent 回写，撤销树整步回退、补全/minimap/查找高亮自动同步。
+    val autoIndentModel = remember { AutoIndentModel() }
     fun jumpToSymbol(line: Int) {
         outlineJumpLine = line
         outlineJumpTick++
@@ -264,6 +268,7 @@ fun EditorArea(vm: MainViewModel) {
                     onFoldChanged = { foldTick++ },
                     commentModel = commentModel,
                     commentRequest = commentRequest,
+                    autoIndentModel = autoIndentModel,
                     outlineJumpLine = outlineJumpLine,
                     outlineJumpTick = outlineJumpTick
                 )
@@ -331,6 +336,7 @@ private fun CodeEditor(
     onFoldChanged: () -> Unit,
     commentModel: CommentModel,
     commentRequest: Int,
+    autoIndentModel: AutoIndentModel,
     outlineJumpLine: Int,
     outlineJumpTick: Int
 ) {
@@ -510,6 +516,27 @@ private fun CodeEditor(
                             e.isCtrlPressed && e.key == Key.F -> { onOpenFind(); true }
                             e.isCtrlPressed && e.key == Key.H -> { onOpenReplace(); true }
                             e.isCtrlPressed && e.key == Key.Slash -> { toggleComment(); true }
+                            // 自动缩进（v0.3.24）：回车延续/增加一级缩进，Tab/Shift+Tab 缩进与反缩进。
+                            // 仅在内核确实改变文本时消费按键，其它场景交还 BasicTextField 默认行为。
+                            e.key == Key.Enter && !e.isCtrlPressed && !e.isShiftPressed -> {
+                                val result = autoIndentModel.onEnter(tab.content, caretOffset)
+                                if (result.text != tab.content) {
+                                    fieldValue = TextFieldValue(result.text, TextRange(result.caret))
+                                    vm.updateContent(tab.path, result.text)
+                                    true
+                                } else false
+                            }
+                            e.key == Key.Tab && !e.isCtrlPressed &&
+                                fieldValue.selection.start == fieldValue.selection.end -> {
+                                val result = autoIndentModel.onTab(
+                                    tab.content, caretOffset, outdent = e.isShiftPressed
+                                )
+                                if (result.text != tab.content) {
+                                    fieldValue = TextFieldValue(result.text, TextRange(result.caret))
+                                    vm.updateContent(tab.path, result.text)
+                                    true
+                                } else false
+                            }
                             e.key == Key.F3 -> { if (e.isShiftPressed) onFindPrev() else onFindNext(); true }
                             e.isCtrlPressed && e.isShiftPressed && e.key == Key.Backslash -> {
                                 jumpToMatchingBracket(); true

@@ -49,6 +49,7 @@ import com.suicoco.core.editor.CommentModel
 import com.suicoco.core.editor.CursorLayoutModel
 import com.suicoco.core.editor.FindModel
 import com.suicoco.core.editor.FoldingModel
+import com.suicoco.core.editor.GoToLineModel
 import com.suicoco.core.editor.MinimapModel
 import com.suicoco.core.editor.MultiCursorModel
 import com.suicoco.core.editor.ReplaceModel
@@ -110,6 +111,34 @@ fun EditorArea(vm: MainViewModel) {
     // 自动缩进（v0.3.24）：纯 Kotlin AutoIndentModel 在回车/Tab/Shift+Tab 时计算新文本与光标，
     // 经 vm.updateContent 回写，撤销树整步回退、补全/minimap/查找高亮自动同步。
     val autoIndentModel = remember { AutoIndentModel() }
+    // 跳转到指定行（v0.3.25）：纯 Kotlin GoToLineModel 解析「行[:列]」并按文档行数/行尾夹紧，
+    // 只产出光标偏移；滚动复用查找/大纲同款「偏移→行→像素」锚点，编辑语义完全不变。
+    val gotoModel = remember { GoToLineModel() }
+    var gotoOpen by remember { mutableStateOf(false) }
+    var gotoQuery by remember { mutableStateOf("") }
+    var gotoNotice by remember { mutableStateOf("") }
+    var gotoOffset by remember { mutableStateOf(-1) }
+    var gotoTick by remember { mutableStateOf(0) } // 递增触发 CodeEditor 定位
+    val gotoFocus = remember { FocusRequester() }
+    fun openGoToLine() {
+        gotoOpen = true
+        gotoQuery = ""
+        gotoNotice = ""
+    }
+    fun closeGoToLine() { gotoOpen = false }
+    fun applyGoToLine() {
+        if (activePath == null) { gotoNotice = "无活动文件"; return }
+        val result = gotoModel.resolve(activeContent, gotoQuery)
+        if (result == null) {
+            gotoNotice = "输入无效，请用 行 或 行:列（如 42、42:8）"
+            return
+        }
+        gotoOffset = result.offset
+        gotoNotice = if (result.clamped)
+            "已夹紧到第 ${result.line + 1} 行第 ${result.column + 1} 列"
+        else "第 ${result.line + 1} 行第 ${result.column + 1} 列"
+        gotoTick++
+    }
     fun jumpToSymbol(line: Int) {
         outlineJumpLine = line
         outlineJumpTick++
@@ -186,6 +215,14 @@ fun EditorArea(vm: MainViewModel) {
                 outlineOpen = !outlineOpen
             }
             Spacer(Modifier.width(16.dp))
+            // 平板无物理键盘时也可点按打开 Ctrl+G 同款跳转行输入栏。
+            ToolbarButton(
+                text = if (gotoOpen) ":# 转到行 ON" else ":# 转到行",
+                enabled = activePath != null
+            ) {
+                if (gotoOpen) closeGoToLine() else openGoToLine()
+            }
+            Spacer(Modifier.width(16.dp))
             ToolbarButton(
                 text = if (multiMode) "⋮ 多光标 ON (${cursorModel.cursorCount()})" else "⋮ 多光标",
                 enabled = true
@@ -218,6 +255,17 @@ fun EditorArea(vm: MainViewModel) {
                 onReplaceOne = { replaceCurrent() },
                 onReplaceAll = { replaceAllMatches() },
                 onClose = { closeFind() }
+            )
+        }
+        // 跳转到指定行（v0.3.25）：Ctrl+G / 工具栏打开，输入 行[:列] 后 Enter 定位，Esc 关闭。
+        if (gotoOpen) {
+            GoToLineBar(
+                query = gotoQuery,
+                notice = gotoNotice,
+                focusRequester = gotoFocus,
+                onQueryChange = { gotoQuery = it; gotoNotice = "" },
+                onApply = { applyGoToLine() },
+                onClose = { closeGoToLine() }
             )
         }
         // 多光标操作条：仅开启时显示，复用内核的列编辑放置与批量编辑能力。
@@ -260,6 +308,7 @@ fun EditorArea(vm: MainViewModel) {
                     findModel = findModel,
                     onOpenFind = { openFind() },
                     onOpenReplace = { openReplace() },
+                    onOpenGoToLine = { openGoToLine() },
                     onFindNext = { findNext() },
                     onFindPrev = { findPrev() },
                     onCloseFind = { closeFind() },
@@ -270,7 +319,9 @@ fun EditorArea(vm: MainViewModel) {
                     commentRequest = commentRequest,
                     autoIndentModel = autoIndentModel,
                     outlineJumpLine = outlineJumpLine,
-                    outlineJumpTick = outlineJumpTick
+                    outlineJumpTick = outlineJumpTick,
+                    gotoOffset = gotoOffset,
+                    gotoTick = gotoTick
                 )
                 CompletionPopup(vm)
                 // 代码大纲面板（v0.3.23）：右侧固定宽度列，列出当前文件声明符号；
@@ -328,6 +379,7 @@ private fun CodeEditor(
     findModel: FindModel,
     onOpenFind: () -> Unit,
     onOpenReplace: () -> Unit,
+    onOpenGoToLine: () -> Unit,
     onFindNext: () -> Unit,
     onFindPrev: () -> Unit,
     onCloseFind: () -> Unit,
@@ -338,7 +390,9 @@ private fun CodeEditor(
     commentRequest: Int,
     autoIndentModel: AutoIndentModel,
     outlineJumpLine: Int,
-    outlineJumpTick: Int
+    outlineJumpTick: Int,
+    gotoOffset: Int,
+    gotoTick: Int
 ) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
@@ -493,6 +547,19 @@ private fun CodeEditor(
         }
     }
 
+    // 跳转到指定行（v0.3.25）：内核已给出夹紧后的光标偏移，这里复用 CursorLayoutModel 反算行号，
+    // 走与查找/大纲完全相同的「行号→像素→animateScrollTo」锚点；光标经 TextFieldValue.selection 移动，
+    // 不改动文本内容，因此撤销树、补全、minimap 与全部高亮均不受影响。
+    LaunchedEffect(gotoTick) {
+        if (gotoTick > 0 && gotoOffset >= 0 && lineHeightPx > 0f) {
+            val text = tab.content
+            val off = gotoOffset.coerceAtMost(text.length)
+            val line = caretLayout.lineColumnOf(text, off).line
+            scrollState.animateScrollTo((line * lineHeightPx).toInt().coerceAtLeast(0))
+            fieldValue = fieldValue.copy(selection = TextRange(off))
+        }
+    }
+
     Row(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier.fillMaxSize().weight(1f)
@@ -515,6 +582,7 @@ private fun CodeEditor(
                         when {
                             e.isCtrlPressed && e.key == Key.F -> { onOpenFind(); true }
                             e.isCtrlPressed && e.key == Key.H -> { onOpenReplace(); true }
+                            e.isCtrlPressed && e.key == Key.G -> { onOpenGoToLine(); true }
                             e.isCtrlPressed && e.key == Key.Slash -> { toggleComment(); true }
                             // 自动缩进（v0.3.24）：回车延续/增加一级缩进，Tab/Shift+Tab 缩进与反缩进。
                             // 仅在内核确实改变文本时消费按键，其它场景交还 BasicTextField 默认行为。
@@ -899,6 +967,58 @@ private fun FindBar(
                 Text(replaceNotice, color = VscodeTheme.FgDim, fontSize = 11.sp)
             }
         }
+    }
+}
+
+/** 跳转到指定行输入栏（v0.3.25）：Ctrl+G / 工具栏「:# 转到行」打开，Enter 定位、Esc 关闭。 */
+@Composable
+private fun GoToLineBar(
+    query: String,
+    notice: String,
+    focusRequester: FocusRequester,
+    onQueryChange: (String) -> Unit,
+    onApply: () -> Unit,
+    onClose: () -> Unit
+) {
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .background(VscodeTheme.WidgetBg).padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(":#", color = VscodeTheme.FgMuted, fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace)
+        Spacer(Modifier.width(8.dp))
+        BasicTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            modifier = Modifier.weight(1f).background(VscodeTheme.InputBg).padding(6.dp)
+                .focusRequester(focusRequester)
+                .onKeyEvent { e ->
+                    if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
+                    when {
+                        e.key == Key.Enter -> { onApply(); true }
+                        e.key == Key.Escape -> { onClose(); true }
+                        else -> false
+                    }
+                },
+            singleLine = true,
+            textStyle = TextStyle(color = VscodeTheme.Fg, fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace),
+            decorationBox = { inner ->
+                if (query.isEmpty()) Text("行[:列]，如 42 或 42:8",
+                    color = VscodeTheme.FgDim, fontSize = 12.sp)
+                inner()
+            }
+        )
+        Spacer(Modifier.width(8.dp))
+        if (notice.isNotEmpty()) {
+            Text(notice, color = VscodeTheme.FgDim, fontSize = 11.sp, maxLines = 1)
+            Spacer(Modifier.width(8.dp))
+        }
+        ToolbarButton("转到", enabled = true, onClick = onApply)
+        Spacer(Modifier.width(4.dp))
+        ToolbarButton("关闭 Esc", enabled = true, onClick = onClose)
     }
 }
 

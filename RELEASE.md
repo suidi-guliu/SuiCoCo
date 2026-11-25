@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.26 — 行操作（Line Operations）：core:editor 移动/复制/删除行内核 + 编辑器快捷键与工具栏接线
+
+> 响应 2026-11-26 00:11 巡检日报（11-25 23:59 轮次）P1「行操作：上下移动行 / 复制行 / 删除行」。在线核对：main HEAD `50162a7`，RELEASE **v0.3.25**，`LineOperationsModel.kt` 在线 404 且 `EditorArea.kt` 无 `moveLine`/`duplicateLine`/`deleteLine` 命中，确认未重复；v0.3.24 自动缩进与 v0.3.25 跳转行均已由前两轮落地，按幂等原则跳过。日报 P0「v0.3.25 CI 收敛」已确认：run `45651148319`（2026-11-25T16:07Z，源码 `f12eba4`/`1428f7a`）两个 job「编译安卓 APK」「构建 .suicj 插件」均 success，`suicoco-debug-apk`（约 16.6 MB）与 `suicj-plugins` 产物齐全，无阻塞。P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3「BasicTextField 原生多段选区 / 视图级折叠 / LSP+DAP」与 P4「阶段4/5/6 todo 无 assignee」非单轮可闭环，维持现状。本轮按 P1 落地行操作并递增小版本为 **v0.3.26**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/LineOperationsModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把 VSCode 最高频的基础行编辑收敛为独立内核。① `apply(text, startLine, endLine, caret, op)` 统一支持上移/下移/复制/删除，行号 0-based、选区覆盖的多行整块处理；② 文档拆为「行内容 + 行间换行符」，行操作只重排行内容、换行符留在位置，因此 CRLF / LF / 孤立 CR 混排与行尾换行原样保留，行首缩进随内容整体移动不重算；③ 复制块在块后插入副本并补齐 size 条换行符（模板取块所在位置的原分隔符，末行兜底前一条或 LF）；④ 删除块同步删掉 size 条分隔，块首为 0 时删块内及块后、否则删块前及块内，保持「剩余分隔数 = 剩余行数 - 1」；⑤ 光标随块移动/增删同步——块内光标跟块走、被跨越的光标落到对应位置、列夹紧到新行长度；⑥ 越界行号/光标夹紧，空文本、非法操作、超 4096 行一律返回 null（失败安全幂等），偏移与列按 UTF-16 code unit 计，零 Android/Compose/三方依赖，core 不依赖 feature 约束不变；另提供 `lineCount`/`lineOfOffset`/`lineStartOf`/`offsetOf` 辅助 API。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：`BasicTextField` 的 `onKeyEvent` 新增 Alt+↑/↓（上下移动行）、Ctrl+D（复制行）、Ctrl+Shift+K（删除行），工具栏新增「↑ 行 / ↓ 行 / ⧉ 复制 / ✕ 删行」四个按钮（平板无物理键盘时可点按），共用顶层 `LineOperationsModel` 与 `applyLineOp` 执行路径；快捷键与工具栏均取当前选区（或光标）覆盖的首末行，结果经 `MainViewModel.updateContent` 回写——撤销树可整步回退，补全/minimap/查找高亮/大纲/自动缩进/跳转行既有行为全部不变；空输入、边界不可移动（首行上移/末行下移）与非法操作不拦截按键、不改文档。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 追加 v0.3.26 行操作条目，标注为纯文本行级操作（非 LSP 语义级重构）。
+- **验证**：`LineOperationsModel` 经 Kotlin 2.2.20 编译器真实编译并运行 **70 项单测全通过**（上移/下移单块与多块、边界阻断、越界夹紧与反向区间、CRLF/LF/CR 与混排换行保留、复制首行/末行/多行/尾换行、删除首行/末行/全部/唯一行、光标映射与夹紧、UTF-16 中文偏移交叉验证、超容量与非法操作失败安全、复制-删除/移动往返幂等）；`EditorArea.kt` 按词法排除注释/字符串后花括号 286/286、圆括号 823/823、方括号 1/1 平衡，新增符号引用与 `CodeEditor` 调用参数/签名一致性静态核对通过；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP（语义级大纲/折叠/配对/重命名/跳转/注释/格式化）与 DAP、CI `upload-artifact` Node 版本告警评估、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。
+
 ## v0.3.25 — 跳转到指定行（Go to Line）：core:editor 行号内核 + 编辑器 Ctrl+G 输入栏接线
 
 > 响应 2026-11-25 18:08 巡检日报（18:00 轮次）P1「Ctrl+G 跳转到指定行」。在线核对：main HEAD `e3b41d9`（源码 `0f28abba`，RELEASE **v0.3.24**），日报发布后主代理已把 12:00 轮次 P3 的自动缩进以 5 个提交（18:09–18:10）推送上线、`GoToLineModel.kt` 在线不存在，确认 P1 未重复且 v0.3.24 已完成，按幂等原则跳过。P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3「BasicTextField 原生多段选区 / LSP+DAP」工程量大、非单轮可闭环，维持后续；P4「CI `upload-artifact@v5` Node 20 告警」双 job 仍 success，升级有破坏已打通构建风险，留专门窗口评估；P5「todo 无 assignee」非仓库文件、成员仅所有者一人，维持现状。本轮按 P1 落地跳转行并递增小版本为 **v0.3.25**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。

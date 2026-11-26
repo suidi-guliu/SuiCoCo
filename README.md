@@ -60,6 +60,10 @@ bash scripts/verify-plugin.sh
 
 见 [docs/PLUGIN_SPEC.md](docs/PLUGIN_SPEC.md)。要点：`.suicj` 是唯一格式，第三方仅能通过软件内导入按钮导入，导入时强制校验 manifest、engines 兼容性与目录穿越防护。
 
+## 版本标记
+
+仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 `v0.3.4`，附 APK 与 5 个 `.suicj` 产物）；功能迭代 `v0.2.5`～`v0.3.x` 的纯源码/文档小版本只记入 [RELEASE.md](RELEASE.md)、随 `main` 提交推进，**不逐个建标**。这是既有惯例的书面确认（见 RELEASE.md 顶部「版本标记惯例」），非遗漏；需要按版本追溯时，以 `RELEASE.md` 中的版本条目与对应提交为准。如需改为逐版建标，再单独立项。
+
 ## 文档
 
 - [架构设计](docs/ARCHITECTURE.md)

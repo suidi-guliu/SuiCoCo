@@ -2,6 +2,14 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.29 — 版本可追溯性：README 补齐「仅阶段里程碑建标」约定
+
+> 响应 2026-11-26 18:00 巡检日报（18:08 留言）P4「版本可追溯性」。在线核对 `main` HEAD `f7acb25`（RELEASE **v0.3.28**）：P1「大小写转换」已由上一轮上线（`75343a4`/`af08bfe`/`ec7f233`/`ae671c9`/`50a23b5`/`5364c7c`，`CaseModel.kt` + 编辑器快捷栏/Ctrl+Shift+U/L + 文档，v0.3.28 CI 双 job success，APK 16,629,639 字节），按幂等跳过；P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + 真机端到端，沙箱无 SDK/NDK/真机，维持阻塞；P3「BasicTextField 原生多段选区 / 视图级折叠 / LSP+DAP」工程量大、非单轮可闭环；P5「阶段4/5/6 todo 无 assignee」非仓库文件，成员仅所有者一人，维持现状。本轮按 P4 落地并递增小版本至 **v0.3.29**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **改动 `README.md`**：新增「版本标记」小节，与 RELEASE.md 顶部 2026-11-22 惯例书面确认保持一致——仅对外发布里程碑建 Git tag / GitHub Release（当前 `v0.3.4`），功能小版本 `v0.2.5`～`v0.3.x` 只记入 RELEASE.md、随 `main` 推进，不逐个建标；版本追溯以 RELEASE.md 条目与对应提交为准，改逐版建标需单独立项。此前 README 未提及该约定，读者易把 RELEASE 中 v0.3.12～v0.3.28 无 tag 误判为遗漏，本轮补齐后两处文档口径统一。
+- **验证**：`bash scripts/verify-plugin.sh` 4 个官方 `.suicj`（hello / C-C++ / Java / Python）全通过；README 与 RELEASE 顶部版本标记表述逐字交叉核对一致，README 内 `RELEASE.md` 相对链接可达。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 上一轮 v0.3.28 run `45799393928` 双 job success 为准，本轮仅改 Markdown 不影响构建。
+- **未闭环**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP（语义级大纲/折叠/配对/重命名/跳转/注释/格式化）与 DAP、阶段4/5/6 todo 无 assignee（非仓库文件）。本轮无新阶段版本，按惯例不建 tag/release。
+
 ## v0.3.28 — 大小写转换（Transform Case）：core:editor 文本转换内核 + 编辑器快捷栏/快捷键接线
 
 > 响应 2026-11-26 12:00 巡检日报（12:02 留言）P1「大小写转换」。在线核对 main HEAD `7bdd9151`（源码 `d1e0e019`，RELEASE **v0.3.27**）：`core/editor` 无 `CaseModel.kt`、`EditorArea.kt` 仅有查找栏「Aa」大小写敏感切换，确认未重复；日报 P4「CI `upload-artifact@v5` Node 20 告警」已由上一轮升级 v6 落地并验证告警清零，按幂等跳过；P2 真实 arm64 `libproot.so` 随包需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3 BasicTextField 原生多段选区/视图级折叠与 LSP/DAP 工程量大、非单轮可闭环；P5 todo 无 assignee 属非仓库文件。本轮按 P1 落地并递增小版本至 **v0.3.28**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。

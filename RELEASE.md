@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.28 — 大小写转换（Transform Case）：core:editor 文本转换内核 + 编辑器快捷栏/快捷键接线
+
+> 响应 2026-11-26 12:00 巡检日报（12:02 留言）P1「大小写转换」。在线核对 main HEAD `7bdd9151`（源码 `d1e0e019`，RELEASE **v0.3.27**）：`core/editor` 无 `CaseModel.kt`、`EditorArea.kt` 仅有查找栏「Aa」大小写敏感切换，确认未重复；日报 P4「CI `upload-artifact@v5` Node 20 告警」已由上一轮升级 v6 落地并验证告警清零，按幂等跳过；P2 真实 arm64 `libproot.so` 随包需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3 BasicTextField 原生多段选区/视图级折叠与 LSP/DAP 工程量大、非单轮可闭环；P5 todo 无 assignee 属非仓库文件。本轮按 P1 落地并递增小版本至 **v0.3.28**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/CaseModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把 VSCode 常用的大小写转换收敛为独立内核。① 支持 7 种操作——转大写 `UPPER`、转小写 `LOWER`、首字母大写（句首式，仅首词）`CAPITALIZE`、标题式（每词首字母）`TITLE`、驼峰 `CAMEL`、蛇形 `SNAKE`、短横线 `KEBAB`；② 有选区时对整段生效，无选区时由 `wordRangeOf` 取光标所在/紧邻左侧的标识符词，落在纯分隔符上则失败安全返回 null；③ 逐行处理选区，CRLF / LF / 孤立 CR 逐字节保留，不跨行合并单词；直接改大小写的操作保留全部非字母字符，词式操作仅重建每行首个词到末个词之间的片段，片段外标点与行尾原样保留；④ 标识符按大小写边界拆分（`helloWorld`、`HTTPServer`、`XMLHttpRequest`、`foo2Bar` 均能正确分词）；⑤ UTF-16 偏移口径、越界夹紧、空输入/非法操作/超 64K 选区失败安全，纯函数幂等，零 Android/Compose/三方依赖，core 不依赖 feature 的约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：工具栏新增「Aa 大小写」开关，展开快捷栏提供 7 个按钮（ABC 大写 / abc 小写 / Aa 首字母 / Aa 标题 / camel 驼峰 / snake 蛇形 / kebab 短横线），平板无物理键盘也可点按；`BasicTextField` 的 `onKeyEvent` 新增 **Ctrl+Shift+U** 转大写、**Ctrl+Shift+L** 转小写，其余风格走快捷栏以免占用常用编辑组合键。工具栏与快捷键共用 `applyCase()`，取当前选区或光标词调用内核，结果经 `MainViewModel.updateContent` 回写——撤销树可整步回退，补全/minimap/查找高亮自动刷新；转换后保持新片段选中，便于连续切换风格。查找栏原有「Aa」仅表示忽略大小写开关，与本文本转换入口互不混淆。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 追加 v0.3.28 大小写转换条目，标注为纯文本词法处理（非 LSP 语义重命名/重构）。
+- **验证**：`CaseModel` 经 Kotlin 2.2.20 编译器真实编译并运行 **102 项断言全通过**（7 种转换、光标词定位、边界与标点/换行保留、中文 UTF-16、大小写边界分词、夹紧与反向区间、空输入/非法操作/超容量失败安全、重复执行幂等）；`EditorArea.kt` 按词法排除注释/字符串后花括号 309/309、圆括号 880/880、方括号 1/1 平衡，`CodeEditor` 调用参数与签名 31/31 一致；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 为准。
+- **未闭环（仍阻塞/待后续）**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP（语义级大纲/折叠/配对/重命名/跳转/注释/格式化）与 DAP、阶段4/5/6 todo 无 assignee（非仓库文件，成员仅所有者一人）。本轮无新阶段版本，按惯例不建 tag/release。
+
 ## v0.3.27 — CI 运行时升级：`upload-artifact` v5 → v6，清除 Node 20 弃用告警
 
 > 响应 2026-11-26 05:59 巡检日报（06:03 留言）P4「CI 告警」。在线基线 HEAD `0198b523`（源码 `07af48ce`，RELEASE **v0.3.26**）：日报 P1「行操作」已由上一轮 06:13 回复先行落地为 v0.3.26（在线 `LineOperationsModel.kt` 为 200、CI run `45710172502` 双 job success），按幂等跳过；P2 真实 arm64 `libproot.so` 随包仍受缺 NDK27/SDK/真机阻塞；P3 BasicTextField 原生多段选区、视图级行折叠与 LSP/DAP 工程量大、非单轮可闭环。本轮只处理可安全落地的 P4，保持三条不变量（无 host root / 官方源 / 仅 arm64）。

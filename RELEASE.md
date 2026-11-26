@@ -2,6 +2,14 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.27 — CI 运行时升级：`upload-artifact` v5 → v6，清除 Node 20 弃用告警
+
+> 响应 2026-11-26 05:59 巡检日报（06:03 留言）P4「CI 告警」。在线基线 HEAD `0198b523`（源码 `07af48ce`，RELEASE **v0.3.26**）：日报 P1「行操作」已由上一轮 06:13 回复先行落地为 v0.3.26（在线 `LineOperationsModel.kt` 为 200、CI run `45710172502` 双 job success），按幂等跳过；P2 真实 arm64 `libproot.so` 随包仍受缺 NDK27/SDK/真机阻塞；P3 BasicTextField 原生多段选区、视图级行折叠与 LSP/DAP 工程量大、非单轮可闭环。本轮只处理可安全落地的 P4，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **改动 `.github/workflows/build.yml`**：两处 `uses: actions/upload-artifact@v5` 改为 `@v6`（APK 上传与 `.suicj` 插件包上传）。依据上一轮 run `45710172502` 日志，v5 触发 `Node.js 20 is deprecated ... forced to run on Node.js 24: actions/upload-artifact@v5` 告警；v6 官方发布说明确认 `runs.using: node24` 原生运行时、`name`/`path` 输入不变、最低 Actions Runner 2.327.1（GitHub 托管 `ubuntu-24.04` 满足），并修复 punycode 弃用告警。`actions/checkout@v5`、`actions/setup-java@v5` 已是 node24，未改动；另一条 `.github/workflows/build-plugins.yml` 未使用 upload-artifact，未改动。
+- **验证**：本地 YAML 解析通过（jobs: `build-apk` / `build-plugins`）；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。推送提交 `ab5912e8` 后在线 Actions：run `45752897593`（Build suicoco）与 `45752897549`（build-plugins）**双 job success**，产物 `suicoco-debug-apk` 16,614,940 字节、`suicj-plugins` 8,059 字节；两份新日志中检索 `Node.js 20 is deprecated` / `upload-artifact@v5` 命中 **0**，告警已清除。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 CI 为准。
+- **未闭环**：P2（真实 arm64 proot 随包 + 真机端到端）与 P3（原生多段选区 / 视图级折叠 / LSP+DAP）维持原状；本轮无新阶段版本，按惯例不建 tag/release。
+
 ## v0.3.26 — 行操作（Line Operations）：core:editor 移动/复制/删除行内核 + 编辑器快捷键与工具栏接线
 
 > 响应 2026-11-26 00:11 巡检日报（11-25 23:59 轮次）P1「行操作：上下移动行 / 复制行 / 删除行」。在线核对：main HEAD `50162a7`，RELEASE **v0.3.25**，`LineOperationsModel.kt` 在线 404 且 `EditorArea.kt` 无 `moveLine`/`duplicateLine`/`deleteLine` 命中，确认未重复；v0.3.24 自动缩进与 v0.3.25 跳转行均已由前两轮落地，按幂等原则跳过。日报 P0「v0.3.25 CI 收敛」已确认：run `45651148319`（2026-11-25T16:07Z，源码 `f12eba4`/`1428f7a`）两个 job「编译安卓 APK」「构建 .suicj 插件」均 success，`suicoco-debug-apk`（约 16.6 MB）与 `suicj-plugins` 产物齐全，无阻塞。P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3「BasicTextField 原生多段选区 / 视图级折叠 / LSP+DAP」与 P4「阶段4/5/6 todo 无 assignee」非单轮可闭环，维持现状。本轮按 P1 落地行操作并递增小版本为 **v0.3.26**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。

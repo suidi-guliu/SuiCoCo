@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import com.suicoco.core.design.VscodeTheme
 import com.suicoco.core.editor.AutoIndentModel
 import com.suicoco.core.editor.BracketMatchModel
+import com.suicoco.core.editor.CaseModel
 import com.suicoco.core.editor.CommentModel
 import com.suicoco.core.editor.CursorLayoutModel
 import com.suicoco.core.editor.FindModel
@@ -129,6 +130,14 @@ fun EditorArea(vm: MainViewModel) {
     var lineOpRequest by remember { mutableStateOf(0) }
     var lineOpKind by remember { mutableStateOf(LineOperationsModel.MOVE_UP) }
     fun requestLineOp(kind: Int) { lineOpKind = kind; lineOpRequest++ }
+    // 大小写转换（v0.3.28）：纯 Kotlin CaseModel 对选区（或光标词）做 7 种转换，
+    // 工具栏「Aa 大小写」展开快捷栏，Ctrl+Shift+U/L 直接转大写/小写；
+    // 结果经 vm.updateContent 回写，撤销树整步回退、补全/minimap/查找高亮自动同步。
+    val caseModel = remember { CaseModel() }
+    var caseOpen by remember { mutableStateOf(false) }
+    var caseRequest by remember { mutableStateOf(0) }
+    var caseKind by remember { mutableStateOf(CaseModel.UPPER) }
+    fun requestCase(kind: Int) { caseKind = kind; caseRequest++ }
     fun openGoToLine() {
         gotoOpen = true
         gotoQuery = ""
@@ -239,6 +248,13 @@ fun EditorArea(vm: MainViewModel) {
             ToolbarButton("✕ 删行", activePath != null) { requestLineOp(LineOperationsModel.DELETE) }
             Spacer(Modifier.width(12.dp))
             ToolbarButton(
+                text = if (caseOpen) "Aa 大小写 ON" else "Aa 大小写",
+                enabled = activePath != null
+            ) {
+                caseOpen = !caseOpen
+            }
+            Spacer(Modifier.width(12.dp))
+            ToolbarButton(
                 text = if (multiMode) "⋮ 多光标 ON (${cursorModel.cursorCount()})" else "⋮ 多光标",
                 enabled = true
             ) {
@@ -282,6 +298,10 @@ fun EditorArea(vm: MainViewModel) {
                 onApply = { applyGoToLine() },
                 onClose = { closeGoToLine() }
             )
+        }
+        // 大小写转换快捷栏（v0.3.28）：点按对当前选区/光标词执行对应转换，无需物理键盘。
+        if (caseOpen) {
+            CaseBar(onTransform = { kind -> requestCase(kind) }, onClose = { caseOpen = false })
         }
         // 多光标操作条：仅开启时显示，复用内核的列编辑放置与批量编辑能力。
         if (multiMode) {
@@ -339,7 +359,10 @@ fun EditorArea(vm: MainViewModel) {
                     gotoTick = gotoTick,
                     lineOpsModel = lineOpsModel,
                     lineOpRequest = lineOpRequest,
-                    lineOpKind = lineOpKind
+                    lineOpKind = lineOpKind,
+                    caseModel = caseModel,
+                    caseRequest = caseRequest,
+                    caseKind = caseKind
                 )
                 CompletionPopup(vm)
                 // 代码大纲面板（v0.3.23）：右侧固定宽度列，列出当前文件声明符号；
@@ -413,7 +436,10 @@ private fun CodeEditor(
     gotoTick: Int,
     lineOpsModel: LineOperationsModel,
     lineOpRequest: Int,
-    lineOpKind: Int
+    lineOpKind: Int,
+    caseModel: CaseModel,
+    caseRequest: Int,
+    caseKind: Int
 ) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
@@ -567,6 +593,23 @@ private fun CodeEditor(
         if (lineOpRequest > 0) applyLineOp(lineOpKind)
     }
 
+    // 大小写转换（v0.3.28）：有选区则整段转换，无选区则由内核取光标所在词。
+    // 工具栏快捷栏与 Ctrl+Shift+U/L 共用此函数；新文本经 vm.updateContent 回写，
+    // 撤销树可整步回退，转换后的片段保持选中便于连续切换风格。
+    fun applyCase(kind: Int) {
+        val text = tab.content
+        if (text.isEmpty()) return
+        val selStart = fieldValue.selection.start.coerceAtMost(text.length)
+        val selEnd = fieldValue.selection.end.coerceAtMost(text.length)
+        val result = caseModel.apply(text, selStart, selEnd, kind) ?: return
+        if (result.text == text) return
+        vm.updateContent(tab.path, result.text)
+        fieldValue = fieldValue.copy(selection = TextRange(result.start, result.end))
+    }
+    LaunchedEffect(caseRequest) {
+        if (caseRequest > 0) applyCase(caseKind)
+    }
+
     // F3 / Ctrl+F 跳转后滚动到当前匹配所在行：用 CursorLayoutModel 求匹配起点的行号，
     // 换算为像素后平滑滚动；findTick 变化才触发，输入过程（findIndex=0）也会定位首个匹配。
     LaunchedEffect(findTick, findIndex) {
@@ -632,6 +675,14 @@ private fun CodeEditor(
                             e.isCtrlPressed && e.key == Key.H -> { onOpenReplace(); true }
                             e.isCtrlPressed && e.key == Key.G -> { onOpenGoToLine(); true }
                             e.isCtrlPressed && e.key == Key.Slash -> { toggleComment(); true }
+                            // 大小写转换（v0.3.28）：Ctrl+Shift+U 大写、Ctrl+Shift+L 小写；
+                            // 其余风格走工具栏「Aa 大小写」快捷栏，避免占用常用编辑组合键。
+                            e.isCtrlPressed && e.isShiftPressed && e.key == Key.U -> {
+                                applyCase(CaseModel.UPPER); true
+                            }
+                            e.isCtrlPressed && e.isShiftPressed && e.key == Key.L -> {
+                                applyCase(CaseModel.LOWER); true
+                            }
                             // 行操作（v0.3.26）：Alt+↑/↓ 上下移动整行，Ctrl+D 复制行，Ctrl+Shift+K 删除行。
                             e.isAltPressed &&
                                 (e.key == Key.DirectionUp || e.key == Key.DirectionDown) -> {
@@ -1265,6 +1316,28 @@ private fun OutlinePanel(
                 }
             }
         }
+    }
+}
+
+/** 大小写转换快捷栏（v0.3.28）：平板无键盘时点按执行 7 种转换，均作用于当前选区或光标词。 */
+@Composable
+private fun CaseBar(onTransform: (Int) -> Unit, onClose: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            .background(VscodeTheme.TabInactiveBg).padding(horizontal = 10.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("大小写:", color = VscodeTheme.FgDim, fontSize = 12.sp)
+        Spacer(Modifier.width(8.dp))
+        ToolbarButton("ABC 大写") { onTransform(CaseModel.UPPER) }
+        ToolbarButton("abc 小写") { onTransform(CaseModel.LOWER) }
+        ToolbarButton("Aa 首字母") { onTransform(CaseModel.CAPITALIZE) }
+        ToolbarButton("Aa 标题") { onTransform(CaseModel.TITLE) }
+        ToolbarButton("camel 驼峰") { onTransform(CaseModel.CAMEL) }
+        ToolbarButton("snake 蛇形") { onTransform(CaseModel.SNAKE) }
+        ToolbarButton("kebab 短横线") { onTransform(CaseModel.KEBAB) }
+        Spacer(Modifier.width(8.dp))
+        ToolbarButton("关闭") { onClose() }
     }
 }
 

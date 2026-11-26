@@ -52,6 +52,7 @@ import com.suicoco.core.editor.CursorLayoutModel
 import com.suicoco.core.editor.FindModel
 import com.suicoco.core.editor.FoldingModel
 import com.suicoco.core.editor.GoToLineModel
+import com.suicoco.core.editor.IndentGuideModel
 import com.suicoco.core.editor.LineOperationsModel
 import com.suicoco.core.editor.MinimapModel
 import com.suicoco.core.editor.MultiCursorModel
@@ -138,6 +139,9 @@ fun EditorArea(vm: MainViewModel) {
     var caseRequest by remember { mutableStateOf(0) }
     var caseKind by remember { mutableStateOf(CaseModel.UPPER) }
     fun requestCase(kind: Int) { caseKind = kind; caseRequest++ }
+    // 缩进指南线（v0.3.30）：纯 Kotlin IndentGuideModel 按前导空白算每行 guide 列，
+    // 相邻行同列合并为连续竖线；不写回缓冲区，仅作视觉指示，随内容重组自动刷新，不拦截输入。
+    val indentGuideModel = remember { IndentGuideModel() }
     fun openGoToLine() {
         gotoOpen = true
         gotoQuery = ""
@@ -362,7 +366,8 @@ fun EditorArea(vm: MainViewModel) {
                     lineOpKind = lineOpKind,
                     caseModel = caseModel,
                     caseRequest = caseRequest,
-                    caseKind = caseKind
+                    caseKind = caseKind,
+                    indentGuideModel = indentGuideModel
                 )
                 CompletionPopup(vm)
                 // 代码大纲面板（v0.3.23）：右侧固定宽度列，列出当前文件声明符号；
@@ -439,7 +444,8 @@ private fun CodeEditor(
     lineOpKind: Int,
     caseModel: CaseModel,
     caseRequest: Int,
-    caseKind: Int
+    caseKind: Int,
+    indentGuideModel: IndentGuideModel
 ) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
@@ -530,6 +536,10 @@ private fun CodeEditor(
         val target = bracketModel.jumpToMatch(tab.content, caretOffset)
         if (target != caretOffset) fieldValue = fieldValue.copy(selection = TextRange(target))
     }
+
+    // 缩进指南线（v0.3.30）：纯 Kotlin IndentGuideModel 算出的连续竖线段，坐标口径与 caret /
+    // 选区高亮完全一致（textStartPx/textTopPx + 列宽/行高），随文本与 tab 宽度重组，不拦截输入。
+    val guideRuns = remember(tab.content) { indentGuideModel.runsOf(tab.content) }
 
     // 代码折叠（v0.3.21）：纯 Kotlin FoldingModel 识别可折叠区间（花括号配对 + 缩进块）。
     // 折叠区间随文本变化重算；折叠态由内核按 path+起始行记快照，foldTick 变化触发行号栏重组。
@@ -776,6 +786,21 @@ private fun CodeEditor(
                         }
                         Spacer(Modifier.width(40.dp))
                         inner()
+                        // 缩进指南线层（v0.3.30）：每个连续段画一条 1dp 竖线，自列 0 起按列宽定位。
+                        // 与 caret/选区同用 textStartPx/textTopPx + charWidthPx/lineHeightPx 口径；
+                        // 无 clickable/pointerInput，不拦截键盘与触摸输入，纯视觉指示。
+                        guideRuns.forEach { run ->
+                            Box(
+                                modifier = Modifier
+                                    .offset(
+                                        x = with(density) { (textStartPx + run.column * charWidthPx).toDp() },
+                                        y = with(density) { (textTopPx + run.startLine * lineHeightPx).toDp() }
+                                    )
+                                    .width(1.dp)
+                                    .height(with(density) { ((run.endLine - run.startLine + 1) * lineHeightPx).toDp() })
+                                    .background(VscodeTheme.FgDim.copy(alpha = 0.30f))
+                            )
+                        }
                         // 文件内查找高亮层（v0.3.18）：所有匹配淡黄底，当前匹配更亮的橙底。
                         // 放在 inner() 之后绘制于文本之上、不放 clickable/pointerInput，不拦截输入。
                         findRects.forEach { r ->

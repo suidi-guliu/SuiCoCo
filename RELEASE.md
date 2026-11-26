@@ -2,12 +2,22 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.30 — 缩进指南线（Indent Guides）：core:editor 竖线内核 + 编辑器视觉层叠加
+
+> 响应 2026-11-26 23:59 巡检日报（11-27 00:09 留言）P1「缩进指南线」。在线核对 `main` HEAD `fbb0c1d34f`（RELEASE **v0.3.29**，README/RELEASE 已含 v0.3.29 提交）：`core/editor` 17 个内核与 `docs/ARCHITECTURE.md` §7 均无 indent guide 实现，确认未重复；日报 P4「v0.3.29 CI 结果补记」已在本版回填（run `45855396591` 双 job success），按幂等不再单列；P2 真实 arm64 `libproot.so` 随包需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3 BasicTextField 原生多段选区 / 视图级折叠 / LSP+DAP 工程量大、非单轮可闭环；P5 阶段4/5/6 todo 无 assignee 属非仓库文件。本轮按 P1 落地并递增小版本至 **v0.3.30**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/IndentGuideModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把 VSCode 的缩进参考竖线收敛为独立内核。① 视觉列按等宽字体计——空格 +1、tab 对齐到下一个 tabWidth 倍数（1..8 合法，其余回退默认 4），遇首个非空白即停；② 每行 guide 列为 `0, tabWidth, 2*tabWidth, …` 且严格小于缩进宽度，空行 / 纯空白行跳过；③ `runsOf` 把相邻行同列合并为连续竖直段 `GuideRun(column, startLine, endLine)`，按 (startLine, column) 稳定排序；④ 行数上限 4000、每行列数上限 64、总段数上限 12000，空输入 / 非法 tabWidth 失败安全，纯函数幂等（同输入输出恒定），零 Android/Compose/三方依赖，core 不依赖 feature 的约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：`CodeEditor` 的 `decorationBox` 在 `inner()` 之后叠加指南线层——每个 `GuideRun` 用 `Box+offset+width(1.dp)+height+background(FgDim 0.30)` 画一条竖线，坐标口径与 caret / 选区高亮完全一致（`textStartPx/textTopPx + charWidthPx/lineHeightPx`），随文本重组自动刷新；无 `clickable`/`pointerInput`，不拦截键盘与触摸输入。`EditorArea` 顶层 `remember { IndentGuideModel() }`，与折叠/大纲/自动缩进/大小写转换等既有内核并列，仅作视觉指示、不写回缓冲区，撤销树/补全/minimap/查找高亮行为不变。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 追加 v0.3.30 缩进指南线条目，标注为纯词法视觉指示（非 LSP 语义缩进）。
+- **验证**：`IndentGuideModel` 经 Kotlin 2.2.20 编译器真实编译并运行 **56 项断言全通过**（CRLF/LF/CR 拆行、空格/tab/混合缩进与 tabWidth 边界、纯空白行跳过、逐行 guide 列、连续段合并与空行打断、缩进递减闭合、200 行幂等与稳定排序、5000 行容量上限不崩溃，单测曾捕获并修正「纯空白行误产生 guide」1 处真实缺陷）；`EditorArea.kt` 按词法排除注释/字符串后花括号 315/315、圆括号 899/899、方括号 12/12 平衡，`CodeEditor` 调用参数与签名 32/32 一致；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 为准。
+- **未闭环**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP 与 DAP、阶段4/5/6 todo 无 assignee（非仓库文件）。本轮无新阶段版本，按惯例不建 tag/release。
+
 ## v0.3.29 — 版本可追溯性：README 补齐「仅阶段里程碑建标」约定
 
 > 响应 2026-11-26 18:00 巡检日报（18:08 留言）P4「版本可追溯性」。在线核对 `main` HEAD `f7acb25`（RELEASE **v0.3.28**）：P1「大小写转换」已由上一轮上线（`75343a4`/`af08bfe`/`ec7f233`/`ae671c9`/`50a23b5`/`5364c7c`，`CaseModel.kt` + 编辑器快捷栏/Ctrl+Shift+U/L + 文档，v0.3.28 CI 双 job success，APK 16,629,639 字节），按幂等跳过；P2「真实 arm64 `libproot.so` 随包」需 NDK27 交叉编译 + 真机端到端，沙箱无 SDK/NDK/真机，维持阻塞；P3「BasicTextField 原生多段选区 / 视图级折叠 / LSP+DAP」工程量大、非单轮可闭环；P5「阶段4/5/6 todo 无 assignee」非仓库文件，成员仅所有者一人，维持现状。本轮按 P4 落地并递增小版本至 **v0.3.29**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
 
 - **改动 `README.md`**：新增「版本标记」小节，与 RELEASE.md 顶部 2026-11-22 惯例书面确认保持一致——仅对外发布里程碑建 Git tag / GitHub Release（当前 `v0.3.4`），功能小版本 `v0.2.5`～`v0.3.x` 只记入 RELEASE.md、随 `main` 推进，不逐个建标；版本追溯以 RELEASE.md 条目与对应提交为准，改逐版建标需单独立项。此前 README 未提及该约定，读者易把 RELEASE 中 v0.3.12～v0.3.28 无 tag 误判为遗漏，本轮补齐后两处文档口径统一。
-- **验证**：`bash scripts/verify-plugin.sh` 4 个官方 `.suicj`（hello / C-C++ / Java / Python）全通过；README 与 RELEASE 顶部版本标记表述逐字交叉核对一致，README 内 `RELEASE.md` 相对链接可达。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 上一轮 v0.3.28 run `45799393928` 双 job success 为准，本轮仅改 Markdown 不影响构建。
+- **验证**：`bash scripts/verify-plugin.sh` 4 个官方 `.suicj`（hello / C-C++ / Java / Python）全通过；README 与 RELEASE 顶部版本标记表述逐字交叉核对一致，README 内 `RELEASE.md` 相对链接可达。本地无 JDK21/Android SDK，完整 Compose/APK 编译以在线 GitHub Actions 上一轮 v0.3.28 run `45799393928` 双 job success 为准，本轮仅改 Markdown 不影响构建。**CI 结果补记（2026-11-26 23:59 巡检 P4）**：本版（`bc2792447c`/`a5b43fe6b0dc`）的 `Build suicoco` run `45855396591` 已由 in_progress 转为 **completed / success**，「编译安卓 APK」与「构建 .suicj 插件」双 job 全绿；`build-plugins` run `45855397220` 亦 success。此后在线核对无需再追查该 run 状态。
 - **未闭环**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP（语义级大纲/折叠/配对/重命名/跳转/注释/格式化）与 DAP、阶段4/5/6 todo 无 assignee（非仓库文件）。本轮无新阶段版本，按惯例不建 tag/release。
 
 ## v0.3.28 — 大小写转换（Transform Case）：core:editor 文本转换内核 + 编辑器快捷栏/快捷键接线

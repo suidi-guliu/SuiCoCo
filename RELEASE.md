@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.31 — 安装设计文档 rootfs 来源纠偏：统一 cdimage.ubuntu.com 官方 ubuntu-base + SHA-256 强校验
+
+> 响应 2026-11-27 05:59 巡检日报（06:05 留言）P3「修正安装设计文档的 rootfs 来源」。在线核对 `main` HEAD `21495a877`（RELEASE **v0.3.30**）：日报 P1「v0.3.29 CI 结果补记」与 P2「缩进指南线」已由上一轮 v0.3.30 落地（提交 `d621edb`/`efe4be0`/`97ee597`/`9f91ed1`，最终 HEAD `a6afc42`/`21495a8`），按幂等跳过；P4 真实 arm64 `libproot.so` 随包需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P5 BasicTextField 原生多段选区 / 视图级折叠 / LSP+DAP 工程量大、非单轮可闭环；P6 阶段4/5/6 todo 无 assignee 属非仓库文件。本轮按 P3 落地并递增小版本至 **v0.3.31**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **修正 `docs/INSTALLER_DESIGN.md` §3 表格步骤 1 来源**：由滞后的 `archive.ubuntu.com 官方源` 改为 `cdimage.ubuntu.com 官方 ubuntu-base（SHA-256 强校验）`；表格下新增「步骤 1 来源说明」——明确 rootfs 固定取自 `ubuntu-base-24.04.5-base-arm64.tar.gz`（`DistroProfile.UBUNTU_2404.downloadUrl`），与 `scripts/install-ubuntu-minimal.sh` 下载源一致；官方 `SHA256SUMS` 校验值内置 `DistroProfile.UBUNTU_2404.sha256`，`RootfsManager.download` 下载后强制比对，不匹配即删除归档并抛错（非「尽力而为」校验）；`archive.ubuntu.com` 仅作为步骤 2～4 的 apt 软件包源，不是 rootfs 镜像来源。此前 §6 已写对 cdimage 来源，§3 表格滞后一个版本，本轮消除同一文档内的自相矛盾。
+- **修正 §6 校验归属措辞**：原文把 SHA-256 校验写在 `RootfsManager.extract` 名下；实际强校验发生在 `RootfsManager.download`（比对 `profile.sha256`，失败即删除缓存并抛 `RuntimeException`），`extract` 只负责纯 Kotlin tar 解析与路径穿越防护。按真实实现拆分表述，避免误导后续维护者。
+- **核对基准 `core/distro/src/main/java/com/suicoco/core/distro/DistroModels.kt`**：`UBUNTU_2404.downloadUrl` 已为 cdimage ubuntu-base 24.04.5 arm64、`sha256` 内置官方值（`a91d5a93…`），与脚本、文档三方口径一致，无需改动源码；本轮为纯文档修正，不影响构建。
+- **验证**：`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过（退出码 0）；全仓（排除 `legacy-web-prototype/`）检索 `archive.ubuntu.com 官方源` 命中 **0**，错误提法无残留；文档步骤 1 URL 与 `DistroModels.kt` 常量逐字一致。本地无 JDK21/Android SDK，未跑 Gradle；本轮仅改 Markdown，APK 构建以在线 GitHub Actions 最新 v0.3.30 run `45903353672` 双 job success（APK 16,633,487 字节 + suicj-plugins 8,061 字节）为准。
+- **未闭环**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP 与 DAP、阶段4/5/6 todo 无 assignee（非仓库文件）。本轮无新阶段版本，按惯例不建 tag/release。
+
 ## v0.3.30 — 缩进指南线（Indent Guides）：core:editor 竖线内核 + 编辑器视觉层叠加
 
 > 响应 2026-11-26 23:59 巡检日报（11-27 00:09 留言）P1「缩进指南线」。在线核对 `main` HEAD `fbb0c1d34f`（RELEASE **v0.3.29**，README/RELEASE 已含 v0.3.29 提交）：`core/editor` 17 个内核与 `docs/ARCHITECTURE.md` §7 均无 indent guide 实现，确认未重复；日报 P4「v0.3.29 CI 结果补记」已在本版回填（run `45855396591` 双 job success），按幂等不再单列；P2 真实 arm64 `libproot.so` 随包需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3 BasicTextField 原生多段选区 / 视图级折叠 / LSP+DAP 工程量大、非单轮可闭环；P5 阶段4/5/6 todo 无 assignee 属非仓库文件。本轮按 P1 落地并递增小版本至 **v0.3.30**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。

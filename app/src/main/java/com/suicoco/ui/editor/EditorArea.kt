@@ -59,6 +59,7 @@ import com.suicoco.core.editor.MultiCursorModel
 import com.suicoco.core.editor.ReplaceModel
 import com.suicoco.core.editor.SelectionHighlightModel
 import com.suicoco.core.editor.SymbolOutlineModel
+import com.suicoco.core.editor.WordMovementModel
 import com.suicoco.data.EditorTab
 import com.suicoco.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
@@ -142,6 +143,12 @@ fun EditorArea(vm: MainViewModel) {
     // 缩进指南线（v0.3.30）：纯 Kotlin IndentGuideModel 按前导空白算每行 guide 列，
     // 相邻行同列合并为连续竖线；不写回缓冲区，仅作视觉指示，随内容重组自动刷新，不拦截输入。
     val indentGuideModel = remember { IndentGuideModel() }
+    // 按词移动/删除（v0.3.32）：纯 Kotlin WordMovementModel 负责词边界与目标偏移，
+    // 移动仅改光标选区、删除经 vm.updateContent 回写，撤销树整步回退、补全/minimap/查找高亮自动同步。
+    val wordModel = remember { WordMovementModel() }
+    var wordRequest by remember { mutableStateOf(0) }
+    var wordKind by remember { mutableStateOf(WordMovementModel.MOVE_LEFT) }
+    fun requestWord(kind: Int) { wordKind = kind; wordRequest++ }
     fun openGoToLine() {
         gotoOpen = true
         gotoQuery = ""
@@ -250,6 +257,12 @@ fun EditorArea(vm: MainViewModel) {
             ToolbarButton("↓ 行", activePath != null) { requestLineOp(LineOperationsModel.MOVE_DOWN) }
             ToolbarButton("⧉ 复制", activePath != null) { requestLineOp(LineOperationsModel.DUPLICATE) }
             ToolbarButton("✕ 删行", activePath != null) { requestLineOp(LineOperationsModel.DELETE) }
+            Spacer(Modifier.width(12.dp))
+            // 按词移动/删除（v0.3.32）：平板无物理键盘时点按执行，与 Ctrl+←/→、Ctrl+Backspace/Delete 同效。
+            ToolbarButton("← 词", activePath != null) { requestWord(WordMovementModel.MOVE_LEFT) }
+            ToolbarButton("词 →", activePath != null) { requestWord(WordMovementModel.MOVE_RIGHT) }
+            ToolbarButton("⌫ 词", activePath != null) { requestWord(WordMovementModel.DELETE_BEFORE) }
+            ToolbarButton("⌦ 词", activePath != null) { requestWord(WordMovementModel.DELETE_AFTER) }
             Spacer(Modifier.width(12.dp))
             ToolbarButton(
                 text = if (caseOpen) "Aa 大小写 ON" else "Aa 大小写",
@@ -367,7 +380,10 @@ fun EditorArea(vm: MainViewModel) {
                     caseModel = caseModel,
                     caseRequest = caseRequest,
                     caseKind = caseKind,
-                    indentGuideModel = indentGuideModel
+                    indentGuideModel = indentGuideModel,
+                    wordModel = wordModel,
+                    wordRequest = wordRequest,
+                    wordKind = wordKind
                 )
                 CompletionPopup(vm)
                 // 代码大纲面板（v0.3.23）：右侧固定宽度列，列出当前文件声明符号；
@@ -445,7 +461,10 @@ private fun CodeEditor(
     caseModel: CaseModel,
     caseRequest: Int,
     caseKind: Int,
-    indentGuideModel: IndentGuideModel
+    indentGuideModel: IndentGuideModel,
+    wordModel: WordMovementModel,
+    wordRequest: Int,
+    wordKind: Int
 ) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
@@ -620,6 +639,36 @@ private fun CodeEditor(
         if (caseRequest > 0) applyCase(caseKind)
     }
 
+    // 按词移动/删除（v0.3.32）：移动仅改 selection 不碰文本；删除经 vm.updateContent 回写，
+    // 撤销树整步回退。工具栏与 Ctrl+←/→、Ctrl+Backspace/Delete 共用此函数。
+    fun applyWord(kind: Int) {
+        val text = tab.content
+        if (text.isEmpty()) return
+        val selStart = fieldValue.selection.start.coerceAtMost(text.length)
+        val selEnd = fieldValue.selection.end.coerceAtMost(text.length)
+        when (kind) {
+            WordMovementModel.MOVE_LEFT ->
+                fieldValue = fieldValue.copy(selection = TextRange(wordModel.wordLeft(text, selStart)))
+            WordMovementModel.MOVE_RIGHT ->
+                fieldValue = fieldValue.copy(selection = TextRange(wordModel.wordRight(text, selEnd)))
+            WordMovementModel.DELETE_BEFORE -> {
+                val result = wordModel.deleteWordBefore(text, selStart, selEnd) ?: return
+                if (result.text == text) return
+                vm.updateContent(tab.path, result.text)
+                fieldValue = fieldValue.copy(selection = TextRange(result.caret))
+            }
+            WordMovementModel.DELETE_AFTER -> {
+                val result = wordModel.deleteWordAfter(text, selStart, selEnd) ?: return
+                if (result.text == text) return
+                vm.updateContent(tab.path, result.text)
+                fieldValue = fieldValue.copy(selection = TextRange(result.caret))
+            }
+        }
+    }
+    LaunchedEffect(wordRequest) {
+        if (wordRequest > 0) applyWord(wordKind)
+    }
+
     // F3 / Ctrl+F 跳转后滚动到当前匹配所在行：用 CursorLayoutModel 求匹配起点的行号，
     // 换算为像素后平滑滚动；findTick 变化才触发，输入过程（findIndex=0）也会定位首个匹配。
     LaunchedEffect(findTick, findIndex) {
@@ -701,6 +750,20 @@ private fun CodeEditor(
                                     else LineOperationsModel.MOVE_DOWN
                                 )
                                 true
+                            }
+                            // 按词移动/删除（v0.3.32）：Ctrl+←/→ 移动光标一个词块，
+                            // Ctrl+Backspace/Ctrl+Delete 删除光标左/右侧词块（有选区则删选区）。
+                            e.isCtrlPressed && !e.isShiftPressed && e.key == Key.DirectionLeft -> {
+                                applyWord(WordMovementModel.MOVE_LEFT); true
+                            }
+                            e.isCtrlPressed && !e.isShiftPressed && e.key == Key.DirectionRight -> {
+                                applyWord(WordMovementModel.MOVE_RIGHT); true
+                            }
+                            e.isCtrlPressed && e.key == Key.Backspace -> {
+                                applyWord(WordMovementModel.DELETE_BEFORE); true
+                            }
+                            e.isCtrlPressed && e.key == Key.Delete -> {
+                                applyWord(WordMovementModel.DELETE_AFTER); true
                             }
                             e.isCtrlPressed && !e.isShiftPressed && e.key == Key.D -> {
                                 applyLineOp(LineOperationsModel.DUPLICATE); true

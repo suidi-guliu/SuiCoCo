@@ -2,6 +2,16 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.32 — 按词移动与按词删除（Word Movement）：core:editor 词块内核 + 编辑器快捷键/工具栏接线
+
+> 响应 2026-11-27 12:00 巡检日报（12:06 留言 `msg_4396eed…`）P3「编辑器增强余项」。在线核对 `main` HEAD `e7d914d`（RELEASE **v0.3.31**）：日报 P1「安装文档 rootfs 来源」已由上一轮 v0.3.31 落地（提交 `189b852`/`73fe098`，按幂等跳过）；P2 真实 arm64 `libproot.so` 随包需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P4 阶段4/5/6 todo 无 assignee 属非仓库文件；P5 版本口径已沿用单干净 run 记录。P3 所列原生多段选区 / 视图级折叠 / LSP+DAP 属大工程、非单轮可闭环，本轮沿用项目惯例从中挑一个可离线单测、CI 安全、未重复的 VSCode 高频基础能力——按词移动/删除落地，并递增小版本至 **v0.3.32**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/WordMovementModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：把 VSCode 最高频的「按词导航 + 按词删除」收敛为独立内核。① 字符分三类——空白（`isWhitespace`）、词字符（letter/digit/underscore）、其它标点，连续同类非空白视为一个词块，边界落在类别切换处；② `wordLeft`/`wordRight` 先跨过紧邻空白再跨过同类词块，返回块首/块尾（开区间端点），有选区时左移取 `selStart`、右移取 `selEnd`；③ `wordRangeAt` 取光标所在或紧邻左侧词块的半开区间，落在空白且左侧亦空白时返回 null；④ `deleteWordBefore`/`deleteWordAfter` 有选区则删整个选区（退格语义）、无选区则删左/右词块（含紧邻空白），返回新文本与光标偏移；⑤ UTF-16 code unit 偏移口径，与 `CursorLayoutModel`/`CaseModel` 一致，CRLF/LF/孤立 CR 按空白同口径处理、不破坏换行字节，越界偏移夹紧、空输入/超 200 万字符/无可删内容失败安全返回 null，纯函数幂等，零 Android/Compose/三方依赖，core 不依赖 feature 的约束不变。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：`BasicTextField` 的 `onKeyEvent` 新增 **Ctrl+←/→** 按词移动光标、**Ctrl+Backspace / Ctrl+Delete** 删左/右侧词块；工具栏新增「← 词 / 词 → / ⌫ 词 / ⌦ 词」四按钮供平板无物理键盘时点按，与快捷键共用顶层 `wordModel` 与 `applyWord()` 路径。移动仅改 `TextFieldValue.selection`、不触碰文本与撤销树；删除经 `MainViewModel.updateContent` 回写，撤销树可整步回退，补全/minimap/查找高亮/大纲/折叠/注释/指南线既有行为不变；空文本、边界无可删内容、非法 kind 均不拦截按键、不改文档。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 追加 v0.3.32 按词移动与删除条目，标注为纯词法启发式（非 LSP 语义移动/重命名）。
+- **验证**：`WordMovementModel` 经 Kotlin 2.2.20 编译器真实编译并运行 **70 项断言全通过**（词块边界与标点块、wordLeft/wordRight 跨空白与同类块、CRLF/LF/CR 同口径、UTF-16 中文词块、wordRangeAt、删除左/右词块与选区、重复删除到空、往返幂等、超长文本与越界失败安全；单测初稿曾捕获并修正 9 处预期口径错误）；`EditorArea.kt` 按词法排除注释/字符串后花括号 332/332、圆括号 942/942、方括号 1/1 平衡，`CodeEditor` 调用参数与签名 35/35 一致；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。本地无 JDK21/Android SDK，未跑 Gradle；本轮 Kotlin 源码改动以在线 GitHub Actions 为准，上一轮 v0.3.31 run `45937764933`（head `73fe098`，Build suicoco）双 job success、APK 16,633,486 字节 + 插件 8,063 字节。
+- **未闭环**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP 与 DAP、阶段4/5/6 todo 无 assignee（非仓库文件）。本轮无新阶段版本，按惯例不建 tag/release。
+
 ## v0.3.31 — 安装设计文档 rootfs 来源纠偏：统一 cdimage.ubuntu.com 官方 ubuntu-base + SHA-256 强校验
 
 > 响应 2026-11-27 05:59 巡检日报（06:05 留言）P3「修正安装设计文档的 rootfs 来源」。在线核对 `main` HEAD `21495a877`（RELEASE **v0.3.30**）：日报 P1「v0.3.29 CI 结果补记」与 P2「缩进指南线」已由上一轮 v0.3.30 落地（提交 `d621edb`/`efe4be0`/`97ee597`/`9f91ed1`，最终 HEAD `a6afc42`/`21495a8`），按幂等跳过；P4 真实 arm64 `libproot.so` 随包需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P5 BasicTextField 原生多段选区 / 视图级折叠 / LSP+DAP 工程量大、非单轮可闭环；P6 阶段4/5/6 todo 无 assignee 属非仓库文件。本轮按 P3 落地并递增小版本至 **v0.3.31**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。

@@ -5,6 +5,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# 多个 commit 紧邻推送时串行化本 workflow 的运行，避免并发争抢触发
+# Maven Central 429 / run cancelled；与 build-plugins.yml 的分组彼此独立，
+# 各自串行化、互不取消。cancel-in-progress: false 保证进行中的产物提交不被中断。
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-apk:
     name: 编译安卓 APK

@@ -57,6 +57,7 @@ import com.suicoco.core.editor.LineOperationsModel
 import com.suicoco.core.editor.MinimapModel
 import com.suicoco.core.editor.MultiCursorModel
 import com.suicoco.core.editor.ReplaceModel
+import com.suicoco.core.editor.AutoPairModel
 import com.suicoco.core.editor.SelectionHighlightModel
 import com.suicoco.core.editor.SymbolOutlineModel
 import com.suicoco.core.editor.WordMovementModel
@@ -149,6 +150,10 @@ fun EditorArea(vm: MainViewModel) {
     var wordRequest by remember { mutableStateOf(0) }
     var wordKind by remember { mutableStateOf(WordMovementModel.MOVE_LEFT) }
     fun requestWord(kind: Int) { wordKind = kind; wordRequest++ }
+    // 自动配对括号/引号（v0.3.34）：纯 Kotlin AutoPairModel 比较 onValueChange 的 old/new
+    // 推断单字符插入/选区包裹并补右符号，普通 Backspace 成对删除；结果经 vm.updateContent
+    // 回写，撤销树整步回退、补全/minimap/查找高亮自动同步。与 BracketMatchModel（跳转/高亮）正交。
+    val autoPairModel = remember { AutoPairModel() }
     fun openGoToLine() {
         gotoOpen = true
         gotoQuery = ""
@@ -383,7 +388,8 @@ fun EditorArea(vm: MainViewModel) {
                     indentGuideModel = indentGuideModel,
                     wordModel = wordModel,
                     wordRequest = wordRequest,
-                    wordKind = wordKind
+                    wordKind = wordKind,
+                    autoPairModel = autoPairModel
                 )
                 CompletionPopup(vm)
                 // 代码大纲面板（v0.3.23）：右侧固定宽度列，列出当前文件声明符号；
@@ -464,7 +470,8 @@ private fun CodeEditor(
     indentGuideModel: IndentGuideModel,
     wordModel: WordMovementModel,
     wordRequest: Int,
-    wordKind: Int
+    wordKind: Int,
+    autoPairModel: AutoPairModel
 ) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
@@ -719,8 +726,21 @@ private fun CodeEditor(
             BasicTextField(
                 value = fieldValue,
                 onValueChange = { next ->
-                    fieldValue = next
-                    vm.updateContent(tab.path, next.text)
+                    // 自动配对（v0.3.34）：比较上一次值与本次输入推断编辑类型。
+                    // 内核不接管时保留 BasicTextField 默认行为（IME/粘贴/删除/选区拖拽等）。
+                    val paired = autoPairModel.afterChange(
+                        fieldValue.text, fieldValue.selection.start, fieldValue.selection.end,
+                        next.text, next.selection.start, next.selection.end
+                    )
+                    if (paired != null) {
+                        fieldValue = TextFieldValue(
+                            paired.text, TextRange(paired.selectionStart, paired.selectionEnd)
+                        )
+                        vm.updateContent(tab.path, paired.text)
+                    } else {
+                        fieldValue = next
+                        vm.updateContent(tab.path, next.text)
+                    }
                 },
                 // fillMaxWidth（非 fillMaxSize）：文本按内容高度铺开，滚动交给外层 verticalScroll，
                 // 这样 scrollState 才有真实 maxValue，minimap 的 animateScrollTo 才能定位目标行。
@@ -764,6 +784,19 @@ private fun CodeEditor(
                             }
                             e.isCtrlPressed && e.key == Key.Delete -> {
                                 applyWord(WordMovementModel.DELETE_AFTER); true
+                            }
+                            // 自动配对（v0.3.34）：光标处于成对符号中间时普通 Backspace 一次删两个，
+                            // 有选区/不成对/越界则交还 BasicTextField 默认退格（删单个字符或选区）。
+                            e.key == Key.Backspace && !e.isCtrlPressed -> {
+                                val text = tab.content
+                                val s = fieldValue.selection.start.coerceAtMost(text.length)
+                                val en = fieldValue.selection.end.coerceAtMost(text.length)
+                                val result = autoPairModel.onBackspace(text, s, en)
+                                if (result != null) {
+                                    fieldValue = TextFieldValue(result.text, TextRange(result.selectionStart))
+                                    vm.updateContent(tab.path, result.text)
+                                    true
+                                } else false
                             }
                             e.isCtrlPressed && !e.isShiftPressed && e.key == Key.D -> {
                                 applyLineOp(LineOperationsModel.DUPLICATE); true

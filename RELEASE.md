@@ -2,6 +2,15 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.33 — CI 追溯性与并发防护：回填 v0.3.31 CI 结果 + build.yml 加 concurrency 组
+
+> 响应 2026-11-28 00:00 巡检（对 11-27 18:00 日报 `msg_0ec8df…` 的答复）P1「回填 v0.3.31 自身 CI 结果」与 P5（低）「build.yml 补 concurrency 组」。在线核对 `main` HEAD `d109a6e`（RELEASE 顶部 v0.3.32）：P1 所指 v0.3.31 条目「验证」段仍写"以 v0.3.30 run `45903353672` 为准"，确认未回填；P5 所指 `build.yml` 无 `concurrency`、`build-plugins.yml` 有，确认未落地。P2 真实 arm64 `libproot.so` 随包需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P3 编辑器增强余项（原生多段选区 / 视图级折叠 / LSP+DAP）属大工程、非单轮可闭环（上一轮 v0.3.32 已落地按词移动/删除）；P4 阶段4/5/6 todo 无 assignee 属非仓库文件。本轮按 P1 + P5 落地，递增小版本至 **v0.3.33**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
+
+- **P1 回填 `RELEASE.md` v0.3.31 条目验证段**：本版源码提交 `73fe098` 的 `Build suicoco` run `45937764933`（completed/success）「编译安卓 APK」与「构建 .suicj 插件」双 job 全绿，产物 `suicoco-debug-apk` 16,633,486 字节 + `suicj-plugins` 8,063 字节；`build-plugins` run `45937765004` success。按 v0.3.29/v0.3.30 口径把原"以 v0.3.30 run `45903353672` 为准"替换为上述本版 run 与产物大小，消除追溯歧义，后续巡检无需再追查该 run。经 REST API 逐项核实：`45937764933` status=completed / conclusion=success、artifacts APK 16,633,486 B + suicj 8,063 B，`45937765004` success，与回填值逐字一致。
+- **P5 改 `.github/workflows/build.yml` 加 `concurrency` 组**：在 `on:` 与 `jobs:` 之间新增 `concurrency: group: build-${{ github.ref }}`、`cancel-in-progress: false`，与 `build-plugins.yml` 的 `build-plugins-${{ github.ref }}` 分组彼此独立（各串行化自身 workflow、互不取消），消除历史上多个 commit 紧邻推送时同一 workflow 并发争抢导致 Maven Central 429 / run cancelled 的隐患；正在进行的产物提交不被中断，既有发布行为不变。
+- **验证**：推送前经 REST API 将线上 `RELEASE.md`、`build.yml` 与本地工作区逐字比对一致（无他人改动覆盖风险），回填的 run 号与产物字节数经 Actions API 复核；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过；`build.yml` 修改前后仅新增顶层 `concurrency` 键，jobs（`build-apk` / `build-plugins`）与步骤不变。本地无 JDK21/Android SDK，未跑 Gradle；本轮仅改 Markdown 与 CI YAML、不触碰 APK 源码，构建健康度以线上最近一次双 job success 为准。
+- **未闭环**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP 与 DAP、阶段4/5/6 todo 无 assignee（非仓库文件）。本轮无新阶段版本，按惯例不建 tag/release。
+
 ## v0.3.32 — 按词移动与按词删除（Word Movement）：core:editor 词块内核 + 编辑器快捷键/工具栏接线
 
 > 响应 2026-11-27 12:00 巡检日报（12:06 留言 `msg_4396eed…`）P3「编辑器增强余项」。在线核对 `main` HEAD `e7d914d`（RELEASE **v0.3.31**）：日报 P1「安装文档 rootfs 来源」已由上一轮 v0.3.31 落地（提交 `189b852`/`73fe098`，按幂等跳过）；P2 真实 arm64 `libproot.so` 随包需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P4 阶段4/5/6 todo 无 assignee 属非仓库文件；P5 版本口径已沿用单干净 run 记录。P3 所列原生多段选区 / 视图级折叠 / LSP+DAP 属大工程、非单轮可闭环，本轮沿用项目惯例从中挑一个可离线单测、CI 安全、未重复的 VSCode 高频基础能力——按词移动/删除落地，并递增小版本至 **v0.3.32**，保持三条不变量（无 host root / 官方源 / 仅 arm64）。
@@ -19,7 +28,7 @@
 - **修正 `docs/INSTALLER_DESIGN.md` §3 表格步骤 1 来源**：由滞后的 `archive.ubuntu.com 官方源` 改为 `cdimage.ubuntu.com 官方 ubuntu-base（SHA-256 强校验）`；表格下新增「步骤 1 来源说明」——明确 rootfs 固定取自 `ubuntu-base-24.04.5-base-arm64.tar.gz`（`DistroProfile.UBUNTU_2404.downloadUrl`），与 `scripts/install-ubuntu-minimal.sh` 下载源一致；官方 `SHA256SUMS` 校验值内置 `DistroProfile.UBUNTU_2404.sha256`，`RootfsManager.download` 下载后强制比对，不匹配即删除归档并抛错（非「尽力而为」校验）；`archive.ubuntu.com` 仅作为步骤 2～4 的 apt 软件包源，不是 rootfs 镜像来源。此前 §6 已写对 cdimage 来源，§3 表格滞后一个版本，本轮消除同一文档内的自相矛盾。
 - **修正 §6 校验归属措辞**：原文把 SHA-256 校验写在 `RootfsManager.extract` 名下；实际强校验发生在 `RootfsManager.download`（比对 `profile.sha256`，失败即删除缓存并抛 `RuntimeException`），`extract` 只负责纯 Kotlin tar 解析与路径穿越防护。按真实实现拆分表述，避免误导后续维护者。
 - **核对基准 `core/distro/src/main/java/com/suicoco/core/distro/DistroModels.kt`**：`UBUNTU_2404.downloadUrl` 已为 cdimage ubuntu-base 24.04.5 arm64、`sha256` 内置官方值（`a91d5a93…`），与脚本、文档三方口径一致，无需改动源码；本轮为纯文档修正，不影响构建。
-- **验证**：`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过（退出码 0）；全仓（排除 `legacy-web-prototype/`）检索 `archive.ubuntu.com 官方源` 命中 **0**，错误提法无残留；文档步骤 1 URL 与 `DistroModels.kt` 常量逐字一致。本地无 JDK21/Android SDK，未跑 Gradle；本轮仅改 Markdown，APK 构建以在线 GitHub Actions 最新 v0.3.30 run `45903353672` 双 job success（APK 16,633,487 字节 + suicj-plugins 8,061 字节）为准。
+- **验证**：`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过（退出码 0）；全仓（排除 `legacy-web-prototype/`）检索 `archive.ubuntu.com 官方源` 命中 **0**，错误提法无残留；文档步骤 1 URL 与 `DistroModels.kt` 常量逐字一致。本地无 JDK21/Android SDK，未跑 Gradle；本轮仅改 Markdown。**CI 结果补记（2026-11-28 v0.3.33 巡检 P1）**：本版源码提交 `73fe098` 的 `Build suicoco` run `45937764933`（completed/success）「编译安卓 APK」与「构建 .suicj 插件」双 job 全绿，产物 `suicoco-debug-apk` 16,633,486 字节 + `suicj-plugins` 8,063 字节，`build-plugins` run `45937765004` success；此前"以 v0.3.30 run `45903353672` 为准"系追溯占位，本版自身构建已核实，后续无需再追查该 run。
 - **未闭环**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP 与 DAP、阶段4/5/6 todo 无 assignee（非仓库文件）。本轮无新阶段版本，按惯例不建 tag/release。
 
 ## v0.3.30 — 缩进指南线（Indent Guides）：core:editor 竖线内核 + 编辑器视觉层叠加

@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.suicoco.core.design.VscodeTheme
 import com.suicoco.core.editor.AutoIndentModel
+import com.suicoco.core.editor.BlockCommentModel
 import com.suicoco.core.editor.BracketMatchModel
 import com.suicoco.core.editor.CaseModel
 import com.suicoco.core.editor.CommentModel
@@ -53,6 +54,7 @@ import com.suicoco.core.editor.FindModel
 import com.suicoco.core.editor.FoldingModel
 import com.suicoco.core.editor.GoToLineModel
 import com.suicoco.core.editor.IndentGuideModel
+import com.suicoco.core.editor.IndentSelectionModel
 import com.suicoco.core.editor.LineOperationsModel
 import com.suicoco.core.editor.MinimapModel
 import com.suicoco.core.editor.MultiCursorModel
@@ -154,6 +156,16 @@ fun EditorArea(vm: MainViewModel) {
     // 推断单字符插入/选区包裹并补右符号，普通 Backspace 成对删除；结果经 vm.updateContent
     // 回写，撤销树整步回退、补全/minimap/查找高亮自动同步。与 BracketMatchModel（跳转/高亮）正交。
     val autoPairModel = remember { AutoPairModel() }
+    // 多行选区整体缩进/反缩进（v0.3.35）：有选区的 Tab/Shift+Tab 走 IndentSelectionModel 块缩进，
+    // 无选区保留 AutoIndentModel 单行自动缩进；工具栏按钮与键盘共用同一执行函数。
+    val indentSelectionModel = remember { IndentSelectionModel() }
+    var indentSelRequest by remember { mutableStateOf(0) }
+    var indentSelOutdent by remember { mutableStateOf(false) }
+    fun requestIndentSel(outdent: Boolean) { indentSelOutdent = outdent; indentSelRequest++ }
+    // 块注释切换（v0.3.35）：纯 Kotlin BlockCommentModel 按文件类型推断 /* */ / <!-- --> / """ """，
+    // 有选区包裹选区、无选区包裹当前行，再切换解除；结果经 vm.updateContent 回写，撤销树整步回退。
+    val blockCommentModel = remember { BlockCommentModel() }
+    var blockCommentRequest by remember { mutableStateOf(0) }
     fun openGoToLine() {
         gotoOpen = true
         gotoQuery = ""
@@ -241,6 +253,7 @@ fun EditorArea(vm: MainViewModel) {
             ToolbarButton("↷ 重做", undoState.second) { vm.redo() }
             Spacer(Modifier.width(16.dp))
             ToolbarButton("// 注释", activePath != null) { commentRequest++ }
+            ToolbarButton("/* 块注释", activePath != null) { blockCommentRequest++ }
             Spacer(Modifier.width(16.dp))
             ToolbarButton(
                 text = if (outlineOpen) "☰ 大纲 ON" else "☰ 大纲",
@@ -262,6 +275,10 @@ fun EditorArea(vm: MainViewModel) {
             ToolbarButton("↓ 行", activePath != null) { requestLineOp(LineOperationsModel.MOVE_DOWN) }
             ToolbarButton("⧉ 复制", activePath != null) { requestLineOp(LineOperationsModel.DUPLICATE) }
             ToolbarButton("✕ 删行", activePath != null) { requestLineOp(LineOperationsModel.DELETE) }
+            Spacer(Modifier.width(12.dp))
+            // 多行选区缩进（v0.3.35）：平板无键盘时点按对选中行整体缩进/反缩进，与有选区 Tab/Shift+Tab 同效。
+            ToolbarButton("⇥ 缩进", activePath != null) { requestIndentSel(false) }
+            ToolbarButton("⇤ 反缩进", activePath != null) { requestIndentSel(true) }
             Spacer(Modifier.width(12.dp))
             // 按词移动/删除（v0.3.32）：平板无物理键盘时点按执行，与 Ctrl+←/→、Ctrl+Backspace/Delete 同效。
             ToolbarButton("← 词", activePath != null) { requestWord(WordMovementModel.MOVE_LEFT) }
@@ -389,7 +406,12 @@ fun EditorArea(vm: MainViewModel) {
                     wordModel = wordModel,
                     wordRequest = wordRequest,
                     wordKind = wordKind,
-                    autoPairModel = autoPairModel
+                    autoPairModel = autoPairModel,
+                    indentSelectionModel = indentSelectionModel,
+                    indentSelRequest = indentSelRequest,
+                    indentSelOutdent = indentSelOutdent,
+                    blockCommentModel = blockCommentModel,
+                    blockCommentRequest = blockCommentRequest
                 )
                 CompletionPopup(vm)
                 // 代码大纲面板（v0.3.23）：右侧固定宽度列，列出当前文件声明符号；
@@ -471,7 +493,12 @@ private fun CodeEditor(
     wordModel: WordMovementModel,
     wordRequest: Int,
     wordKind: Int,
-    autoPairModel: AutoPairModel
+    autoPairModel: AutoPairModel,
+    indentSelectionModel: IndentSelectionModel,
+    indentSelRequest: Int,
+    indentSelOutdent: Boolean,
+    blockCommentModel: BlockCommentModel,
+    blockCommentRequest: Int
 ) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
@@ -600,6 +627,48 @@ private fun CodeEditor(
     // 工具栏触发：仅在计数 > 0（即真实点击）时执行，跳过初始组合。
     LaunchedEffect(commentRequest) {
         if (commentRequest > 0) toggleComment()
+    }
+
+    // 块注释切换（v0.3.35）：取当前选区（或折叠光标所在行），按文件类型推断符号对，
+    // 纯 Kotlin BlockCommentModel 包裹/解除；结果经 vm.updateContent 回写，撤销树整步回退。
+    // 工具栏按钮（blockCommentRequest 递增）与 Ctrl+Shift+A 共用此函数。
+    fun toggleBlockComment() {
+        val text = tab.content
+        if (text.isEmpty()) return
+        val tokens = blockCommentModel.tokensFor(tab.path) ?: return
+        val selStart = fieldValue.selection.start.coerceAtMost(text.length)
+        val selEnd = fieldValue.selection.end.coerceAtMost(text.length)
+        val result = blockCommentModel.toggle(text, selStart, selEnd, tokens)
+        if (!result.changed || result.text == text) return
+        vm.updateContent(tab.path, result.text)
+        fieldValue = fieldValue.copy(
+            selection = TextRange(result.selectionStart, result.selectionEnd)
+        )
+    }
+    LaunchedEffect(blockCommentRequest) {
+        if (blockCommentRequest > 0) toggleBlockComment()
+    }
+
+    // 多行选区整体缩进/反缩进（v0.3.35）：仅处理有选区的场景（无选区交还单行自动缩进逻辑）；
+    // 内核从文档推断 tab/空格风格，结果经 vm.updateContent 回写，选区随增删同步、撤销树整步回退。
+    // 工具栏按钮（indentSelRequest 递增）与有选区的 Tab/Shift+Tab 共用此函数。
+    fun applyIndentSelection(outdent: Boolean) {
+        val text = tab.content
+        if (text.isEmpty()) return
+        val selStart = fieldValue.selection.start.coerceAtMost(text.length)
+        val selEnd = fieldValue.selection.end.coerceAtMost(text.length)
+        if (selStart == selEnd) return
+        val result = indentSelectionModel.apply(
+            text, selStart, selEnd, indentSelectionModel.optionsFor(text), outdent
+        )
+        if (result.text == text) return
+        vm.updateContent(tab.path, result.text)
+        fieldValue = fieldValue.copy(
+            selection = TextRange(result.selectionStart, result.selectionEnd)
+        )
+    }
+    LaunchedEffect(indentSelRequest) {
+        if (indentSelRequest > 0) applyIndentSelection(indentSelOutdent)
     }
 
     // 行操作（v0.3.26）：取当前选区（或光标）覆盖的首末行，调用纯 Kotlin 内核移动/复制/删除，
@@ -754,6 +823,10 @@ private fun CodeEditor(
                             e.isCtrlPressed && e.key == Key.H -> { onOpenReplace(); true }
                             e.isCtrlPressed && e.key == Key.G -> { onOpenGoToLine(); true }
                             e.isCtrlPressed && e.key == Key.Slash -> { toggleComment(); true }
+                            // 块注释切换（v0.3.35）：Ctrl+Shift+A 包裹/解除选区或当前行块注释。
+                            e.isCtrlPressed && e.isShiftPressed && e.key == Key.A -> {
+                                toggleBlockComment(); true
+                            }
                             // 大小写转换（v0.3.28）：Ctrl+Shift+U 大写、Ctrl+Shift+L 小写；
                             // 其余风格走工具栏「Aa 大小写」快捷栏，避免占用常用编辑组合键。
                             e.isCtrlPressed && e.isShiftPressed && e.key == Key.U -> {
@@ -813,6 +886,13 @@ private fun CodeEditor(
                                     vm.updateContent(tab.path, result.text)
                                     true
                                 } else false
+                            }
+                            // 多行选区缩进（v0.3.35）：有选区时 Tab/Shift+Tab 走块缩进内核；
+                            // 无选区时保留 AutoIndentModel 单行 Tab/Shift+Tab 的原行为。
+                            e.key == Key.Tab && !e.isCtrlPressed &&
+                                fieldValue.selection.start != fieldValue.selection.end -> {
+                                applyIndentSelection(e.isShiftPressed)
+                                true
                             }
                             e.key == Key.Tab && !e.isCtrlPressed &&
                                 fieldValue.selection.start == fieldValue.selection.end -> {

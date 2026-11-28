@@ -719,17 +719,22 @@ private fun CodeEditor(
         val selStart = fieldValue.selection.start.coerceAtMost(text.length)
         val selEnd = fieldValue.selection.end.coerceAtMost(text.length)
         val width = indentSelectionModel.optionsFor(text).safeTabWidth()
-        val result = when (kind) {
+        // 两个内核各自定义 Result，统一映射为 triple 以避免 when 公共类型退化为 Any。
+        val triple = when (kind) {
             TEXT_TO_SPACES -> indentationConvertModel.toSpaces(text, width, selStart, selEnd)
+                .let { Triple(it.text, it.selectionStart, it.selectionEnd) }
             TEXT_TO_TABS -> indentationConvertModel.toTabs(text, width, selStart, selEnd)
+                .let { Triple(it.text, it.selectionStart, it.selectionEnd) }
             TEXT_SORT_ASC -> sortLinesModel.ascending(text, selStart, selEnd)
+                .let { Triple(it.text, it.selectionStart, it.selectionEnd) }
             TEXT_SORT_DESC -> sortLinesModel.descending(text, selStart, selEnd)
-            else -> null
-        } ?: return
-        if (result.text == text) return
-        vm.updateContent(tab.path, result.text)
+                .let { Triple(it.text, it.selectionStart, it.selectionEnd) }
+            else -> return
+        }
+        if (triple.first == text) return
+        vm.updateContent(tab.path, triple.first)
         fieldValue = fieldValue.copy(
-            selection = TextRange(result.selectionStart, result.selectionEnd)
+            selection = TextRange(triple.second, triple.third)
         )
     }
     LaunchedEffect(textToolRequest) {

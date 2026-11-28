@@ -2,6 +2,17 @@
 
 > **版本标记惯例（2026-11-22 明确，止住每轮重复提示）**：仅**对外发布里程碑**建 Git tag / GitHub Release（当前最新 v0.3.4，附 5 个 `.suicj` + APK 产物）；功能迭代 v0.2.5～v0.3.x 的纯源码/文档小版本只记入本文件、随 `main` 提交推进，不逐个建标。此为既有惯例的书面确认，非遗漏；如需改为逐版建标再单独立项。
 
+## v0.3.36 — 文本工具：缩进风格转换 + 选区行排序（core:editor 双内核）
+
+> 响应 2026-11-28 12:00 巡检日报（12:07 留言 `msg_a323805…`）P4「编辑器增强余项，逐项排期」。核对在线 `main` HEAD `9b96a9f`（RELEASE 顶部 v0.3.35，自身 CI run `46107793098` / `46107793147` 双 job success）：日报 P1「下行选区块缩进」与 P2「块注释切换」已由 v0.3.35 落地且 12:30 回复闭环，按幂等跳过；P3 真实 arm64 `libproot.so` 随包需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P5 阶段4/5/6 todo 无 assignee 属非仓库文件。本轮从 P4 拆出两个 VSCode 高频文本整理能力（缩进风格互转、选区行排序），均为纯 Kotlin 标准库内核、可离线单测，递增小版本至 **v0.3.36**，保持三条不变量（无 host root / 官方源 / 仅 arm64），非里程碑按惯例不建 tag/release。
+
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/IndentationConvertModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：补齐 VSCode「Convert Indentation to Spaces / Tabs」。① 前导缩进先折算为视觉列（tab 跳到下一个 tabWidth 倍数、空格 +1），转空格整体替换为等宽空格、转 tab 替换为 `col/tabWidth` 个 tab 加 `col%tabWidth` 个空格，同宽度下往返一致；② 只动行首前导缩进，行内 tab/空格、字符串与代码语义一律不碰；③ 无选区（折叠光标）作用于全文，有选区仅处理覆盖行，选区结束恰在下一行行首时末行不计入；④ 选区偏移按行增量映射并夹紧到新行长度、CRLF/LF/CR 原样保留、UTF-16 code unit、tabWidth 非法回退 4、行数 2048 / 文本 200 万容量上限、失败安全幂等，零 Android/Compose/三方依赖。
+- **新增 `core/editor/src/main/java/com/suicoco/core/editor/SortLinesModel.kt`（纯 Kotlin 标准库，可独立编译单测）**：补齐 VSCode「Sort Lines Ascending / Descending」。① 对选区覆盖整行做稳定排序，比较键相同保持原相对顺序（降序用比较器反转而非排序后整体反转）；② 只交换行内容、行尾符按原位置保留，CRLF/LF/CR 混排文档排序后不漂移；③ ignoreCase 统一 lowercase 比较，空白行参与排序、不 trim 缩进；④ 无选区排序全文，选区结束在下一行行首时末行不计入，排序后选区收敛到「块首行起始 ~ 末行内容末尾」仍覆盖全部排序行；⑤ UTF-16、行数/文本容量上限、失败安全幂等，纯词法行交换、不调用 shell、不依赖 LSP。
+- **接线 `app/.../ui/editor/EditorArea.kt`**：`CodeEditor` 签名与调用 45/45 一致。工具栏新增「⚒ 文本工具」展开横向滚动快捷栏（复用 `CaseBar` 布局，避免主工具栏拥挤），提供「⇥→空格 / 空格→⇥ / A→Z 升序 / Z→A 降序」四个点按按钮；缩进转换宽度复用 `IndentSelectionModel.optionsFor(text).safeTabWidth()` 与文档风格一致；所有变更经 `MainViewModel.updateContent` 回写，撤销树整步回退、选区同步，补全/minimap/查找高亮/大纲/折叠/行注释/块注释/自动配对/按词操作/多光标/指南线既有行为不变。
+- **文档同步**：`docs/ARCHITECTURE.md` §7 追加 v0.3.36 双内核条目，标注缩进转换为行首词法变换（非 LSP 格式化）、行排序为整行词法交换（非语义排序）。
+- **验证**：两个内核经 Kotlin 2.2.20 编译器真实编译并运行 **42 项断言全通过**（tab/空格视觉列互转与混合缩进、余数空格、行内 tab 不碰、CRLF/LF/CR 保留、部分选区与末行边界、UTF-16 中文、往返幂等、越界/非法宽度/超容量失败安全；升降序、ignoreCase、稳定排序、混排行尾符保留、空行与中文、部分选区与末行边界、已排序 no-op、超容量安全）；`EditorArea.kt` 按词法排除注释/字符串后花括号 372/372、圆括号 1055/1055、方括号 1/1 平衡，`CodeEditor` 调用参数与签名 45/45 一致；`bash scripts/verify-plugin.sh` 4 个官方 `.suicj` 全通过。本地无 JDK21/Android SDK，未跑 Gradle，APK 编译以 GitHub Actions 为准。
+- **未闭环**：真实 arm64 proot 二进制随包（SHA256 + RUNPATH，需 NDK 交叉编译 + arm64 真机）、真机端到端验收、BasicTextField 原生多段文本选区与视图级行折叠、LSP 与 DAP、阶段4/5/6 todo 无 assignee（非仓库文件）。本轮无新阶段版本，按惯例不建 tag/release。
+
 ## v0.3.35 — 多行选区缩进 + 块注释切换：core:editor 双内核 + 编辑器接线
 
 > 响应 2026-11-28 12:00 巡检日报（12:07 留言 `msg_a323805…`）P1「下行选区块缩进/反缩进」与 P2「块注释切换」。在线核对 `main` HEAD `c798d32`（RELEASE 顶部 v0.3.34，v0.3.34 自身 CI run `46074563971`/`46075400076` 双 job success）：`core/editor` 无 `IndentSelectionModel`/`BlockCommentModel`、架构 §7 与 RELEASE 无对应条目，确认两项未落地、不重复劳动。`AutoIndentModel`（v0.3.24）仅处理单行回车/Tab，`CommentModel`（v0.3.22）仅行注释 `//`/`#`/`--`，本次两项与既有内核职责正交：前者补多行选区整体缩进，后者补 `/* */` 等块注释切换。P3 真实 arm64 `libproot.so` 随包需 NDK27 交叉编译 + arm64 真机，沙箱无 SDK/NDK/真机，维持阻塞；P4 编辑器增强余项（原生多段选区/视图级折叠/LSP+DAP）属大工程、非单轮可闭环；P5 阶段4/5/6 todo 无 assignee 属非仓库文件。本轮按 P1+P2 落地，递增小版本至 **v0.3.35**，保持三条不变量（无 host root / 官方源 / 仅 arm64），非里程碑按惯例不建 tag/release。

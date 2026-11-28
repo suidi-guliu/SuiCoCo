@@ -55,10 +55,12 @@ import com.suicoco.core.editor.FoldingModel
 import com.suicoco.core.editor.GoToLineModel
 import com.suicoco.core.editor.IndentGuideModel
 import com.suicoco.core.editor.IndentSelectionModel
+import com.suicoco.core.editor.IndentationConvertModel
 import com.suicoco.core.editor.LineOperationsModel
 import com.suicoco.core.editor.MinimapModel
 import com.suicoco.core.editor.MultiCursorModel
 import com.suicoco.core.editor.ReplaceModel
+import com.suicoco.core.editor.SortLinesModel
 import com.suicoco.core.editor.AutoPairModel
 import com.suicoco.core.editor.SelectionHighlightModel
 import com.suicoco.core.editor.SymbolOutlineModel
@@ -66,6 +68,12 @@ import com.suicoco.core.editor.WordMovementModel
 import com.suicoco.data.EditorTab
 import com.suicoco.viewmodel.MainViewModel
 import kotlinx.coroutines.launch
+
+// 文本工具快捷栏动作（v0.3.36）：缩进风格转换与选区行排序共用一套请求通道。
+private const val TEXT_TO_SPACES = 0
+private const val TEXT_TO_TABS = 1
+private const val TEXT_SORT_ASC = 2
+private const val TEXT_SORT_DESC = 3
 
 @Composable
 fun EditorArea(vm: MainViewModel) {
@@ -166,6 +174,15 @@ fun EditorArea(vm: MainViewModel) {
     // 有选区包裹选区、无选区包裹当前行，再切换解除；结果经 vm.updateContent 回写，撤销树整步回退。
     val blockCommentModel = remember { BlockCommentModel() }
     var blockCommentRequest by remember { mutableStateOf(0) }
+    // 文本工具（v0.3.36）：纯 Kotlin IndentationConvertModel / SortLinesModel 负责缩进风格转换与
+    // 选区行排序；工具栏「⚒ 文本工具」展开快捷栏，点按经 request 递增 + kind 传入 CodeEditor，
+    // 与快捷键共用同一执行函数；结果经 vm.updateContent 回写，撤销树整步回退。
+    val indentationConvertModel = remember { IndentationConvertModel() }
+    val sortLinesModel = remember { SortLinesModel() }
+    var textToolOpen by remember { mutableStateOf(false) }
+    var textToolRequest by remember { mutableStateOf(0) }
+    var textToolKind by remember { mutableStateOf(TEXT_TO_SPACES) }
+    fun requestTextTool(kind: Int) { textToolKind = kind; textToolRequest++ }
     fun openGoToLine() {
         gotoOpen = true
         gotoQuery = ""
@@ -293,6 +310,14 @@ fun EditorArea(vm: MainViewModel) {
                 caseOpen = !caseOpen
             }
             Spacer(Modifier.width(12.dp))
+            // 文本工具（v0.3.36）：展开缩进风格转换与选区行排序快捷栏，平板无键盘亦可点按。
+            ToolbarButton(
+                text = if (textToolOpen) "⚒ 文本工具 ON" else "⚒ 文本工具",
+                enabled = activePath != null
+            ) {
+                textToolOpen = !textToolOpen
+            }
+            Spacer(Modifier.width(12.dp))
             ToolbarButton(
                 text = if (multiMode) "⋮ 多光标 ON (${cursorModel.cursorCount()})" else "⋮ 多光标",
                 enabled = true
@@ -341,6 +366,13 @@ fun EditorArea(vm: MainViewModel) {
         // 大小写转换快捷栏（v0.3.28）：点按对当前选区/光标词执行对应转换，无需物理键盘。
         if (caseOpen) {
             CaseBar(onTransform = { kind -> requestCase(kind) }, onClose = { caseOpen = false })
+        }
+        // 文本工具快捷栏（v0.3.36）：缩进风格互转与选区行升序/降序，无选区时作用于全文。
+        if (textToolOpen) {
+            TextToolBar(
+                onApply = { kind -> requestTextTool(kind) },
+                onClose = { textToolOpen = false }
+            )
         }
         // 多光标操作条：仅开启时显示，复用内核的列编辑放置与批量编辑能力。
         if (multiMode) {
@@ -411,7 +443,11 @@ fun EditorArea(vm: MainViewModel) {
                     indentSelRequest = indentSelRequest,
                     indentSelOutdent = indentSelOutdent,
                     blockCommentModel = blockCommentModel,
-                    blockCommentRequest = blockCommentRequest
+                    blockCommentRequest = blockCommentRequest,
+                    indentationConvertModel = indentationConvertModel,
+                    sortLinesModel = sortLinesModel,
+                    textToolRequest = textToolRequest,
+                    textToolKind = textToolKind
                 )
                 CompletionPopup(vm)
                 // 代码大纲面板（v0.3.23）：右侧固定宽度列，列出当前文件声明符号；
@@ -498,7 +534,11 @@ private fun CodeEditor(
     indentSelRequest: Int,
     indentSelOutdent: Boolean,
     blockCommentModel: BlockCommentModel,
-    blockCommentRequest: Int
+    blockCommentRequest: Int,
+    indentationConvertModel: IndentationConvertModel,
+    sortLinesModel: SortLinesModel,
+    textToolRequest: Int,
+    textToolKind: Int
 ) {
     // 滚动状态提升到 CodeEditor：BasicTextField 走系统自带滚动，外层 Box 的 verticalScroll
     // 仅作为「按行跳转」的可控代理（把滚动锚点换算为像素后 animateScrollTo）。
@@ -669,6 +709,31 @@ private fun CodeEditor(
     }
     LaunchedEffect(indentSelRequest) {
         if (indentSelRequest > 0) applyIndentSelection(indentSelOutdent)
+    }
+
+    // 文本工具（v0.3.36）：缩进风格转换与选区行排序，结果经 vm.updateContent 回写、撤销树整步回退。
+    // 无选区时两内核均作用于全文；有选区时仅处理覆盖行，选区偏移由内核按行增量同步。
+    fun applyTextTool(kind: Int) {
+        val text = tab.content
+        if (text.isEmpty()) return
+        val selStart = fieldValue.selection.start.coerceAtMost(text.length)
+        val selEnd = fieldValue.selection.end.coerceAtMost(text.length)
+        val width = indentSelectionModel.optionsFor(text).safeTabWidth()
+        val result = when (kind) {
+            TEXT_TO_SPACES -> indentationConvertModel.toSpaces(text, width, selStart, selEnd)
+            TEXT_TO_TABS -> indentationConvertModel.toTabs(text, width, selStart, selEnd)
+            TEXT_SORT_ASC -> sortLinesModel.ascending(text, selStart, selEnd)
+            TEXT_SORT_DESC -> sortLinesModel.descending(text, selStart, selEnd)
+            else -> null
+        } ?: return
+        if (result.text == text) return
+        vm.updateContent(tab.path, result.text)
+        fieldValue = fieldValue.copy(
+            selection = TextRange(result.selectionStart, result.selectionEnd)
+        )
+    }
+    LaunchedEffect(textToolRequest) {
+        if (textToolRequest > 0) applyTextTool(textToolKind)
     }
 
     // 行操作（v0.3.26）：取当前选区（或光标）覆盖的首末行，调用纯 Kotlin 内核移动/复制/删除，
@@ -1537,6 +1602,25 @@ private fun CaseBar(onTransform: (Int) -> Unit, onClose: () -> Unit) {
         ToolbarButton("camel 驼峰") { onTransform(CaseModel.CAMEL) }
         ToolbarButton("snake 蛇形") { onTransform(CaseModel.SNAKE) }
         ToolbarButton("kebab 短横线") { onTransform(CaseModel.KEBAB) }
+        Spacer(Modifier.width(8.dp))
+        ToolbarButton("关闭") { onClose() }
+    }
+}
+
+/** 文本工具快捷栏（v0.3.36）：缩进风格互转与选区行排序，复用 [CaseBar] 的横向滚动布局。 */
+@Composable
+private fun TextToolBar(onApply: (Int) -> Unit, onClose: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+            .background(VscodeTheme.TabInactiveBg).padding(horizontal = 10.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("文本工具:", color = VscodeTheme.FgDim, fontSize = 12.sp)
+        Spacer(Modifier.width(8.dp))
+        ToolbarButton("⇥→空格") { onApply(TEXT_TO_SPACES) }
+        ToolbarButton("空格→⇥") { onApply(TEXT_TO_TABS) }
+        ToolbarButton("A→Z 升序") { onApply(TEXT_SORT_ASC) }
+        ToolbarButton("Z→A 降序") { onApply(TEXT_SORT_DESC) }
         Spacer(Modifier.width(8.dp))
         ToolbarButton("关闭") { onClose() }
     }
